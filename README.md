@@ -2,7 +2,7 @@
 
 > B.Tech Major Project — Real-time, ML-driven hybrid Intrusion Detection System
 
-A production-grade, real-time Network IDS that ingests live or replayed network traffic, extracts flow-level features, runs a two-stage hybrid ML detection engine, explains every alert with SHAP, persists data in PostgreSQL + TimescaleDB, and streams live events to a React/TypeScript SOC dashboard.
+A production-grade, real-time Network IDS that ingests live or replayed network traffic, extracts flow-level features, runs a two-stage hybrid ML detection engine, explains every alert with SHAP, persists data in PostgreSQL, and streams live events to a React/TypeScript SOC dashboard.
 
 ---
 
@@ -41,9 +41,10 @@ A production-grade, real-time Network IDS that ingests live or replayed network 
 │                     │  write Alert + FlowRecord                             │
 │                     ▼                                                       │
 │  ┌──────────────────────────────────────┐                                   │
-│  │  PostgreSQL + TimescaleDB            │  localhost:5432                   │
-│  │  flow_records  (hypertable)          │  time_bucket() aggregations       │
-│  │  alerts        (hypertable)          │  JSONB: shap_values, raw_features │
+│  │  PostgreSQL                         │  localhost:5433 / 5432            │
+│  │  flow_records                        │  date_trunc() aggregations        │
+│  │  alerts                              │  JSONB: shap_values, raw_features │
+│  │  threat_intel_cache, reports         │                                   │
 │  └──────────────────────────────────────┘                                   │
 │                     │  WebSocket broadcast                                  │
 │                     ▼                                                       │
@@ -56,7 +57,7 @@ A production-grade, real-time Network IDS that ingests live or replayed network 
 │                     │  HTTP + WebSocket                                     │
 │                     ▼                                                       │
 │  ┌──────────────────────────────────────┐                                   │
-│  │  React Dashboard  (port 5173 / 3000) │                                   │
+│  │  React Dashboard  (port 5173)        │                                   │
 │  │  TrafficFeed  AlertPanel  SeverityGauge │                                │
 │  └──────────────────────────────────────┘                                   │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -69,8 +70,9 @@ A production-grade, real-time Network IDS that ingests live or replayed network 
 ### Prerequisites
 1. **Python 3.11+**
 2. **Node.js 18+ / npm**
-3. **PostgreSQL 16** (with TimescaleDB extension, running on port 5432)
+3. **PostgreSQL 16/18** (running on port 5433 or 5432)
 4. **Redis 7** (running on port 6379)
+5. **Npcap** (for Windows Live Packet Capture)
 
 ---
 
@@ -86,7 +88,7 @@ Ensure `.env` matches your local database and Redis credentials:
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=Akrithi@1234
 POSTGRES_DB=NIDS
-DATABASE_URL=postgresql+asyncpg://postgres:Akrithi%401234@localhost:5432/NIDS
+DATABASE_URL=postgresql+asyncpg://postgres:Akrithi%401234@localhost:5433/NIDS
 REDIS_URL=redis://localhost:6379/0
 ```
 
@@ -106,7 +108,7 @@ pip install -r requirements.txt
 alembic upgrade head
 
 # Start FastAPI Backend Server
-uvicorn api.main:app --reload --port 8000
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 - **API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs)
@@ -138,7 +140,7 @@ npm install
 npm run dev
 ```
 
-- **Dashboard UI**: [http://localhost:5173](http://localhost:5173) (or [http://localhost:3000](http://localhost:3000))
+- **Dashboard UI**: [http://localhost:5173](http://localhost:5173)
 
 ---
 
@@ -149,18 +151,15 @@ npm run dev
 | `POSTGRES_USER` | `postgres` | Local PostgreSQL username |
 | `POSTGRES_PASSWORD` | `Akrithi@1234` | Local PostgreSQL password |
 | `POSTGRES_DB` | `NIDS` | PostgreSQL database name |
-| `DATABASE_URL` | `postgresql+asyncpg://postgres:Akrithi%401234@localhost:5432/NIDS` | Async SQLAlchemy URL |
+| `DATABASE_URL` | `postgresql+asyncpg://postgres:Akrithi%401234@localhost:5433/NIDS` | Async SQLAlchemy URL |
 | `REDIS_URL` | `redis://localhost:6379/0` | Local Redis connection URL |
 | `CAPTURE_MODE` | `replay` | Traffic ingestion mode (`replay` or `live`) |
 | `PCAP_PATH` | `data/sample.pcap` | PCAP file path for replay mode |
-| `CLASSIFIER_MODEL_PATH` | `ml/artifacts/classifier.pkl` | Stage 1 RandomForest model artifact |
+| `CLASSIFIER_MODEL_PATH` | `ml/artifacts/classifier.joblib` | Stage 1 RandomForest model artifact |
 | `AUTOENCODER_MODEL_PATH` | `ml/artifacts/autoencoder.pt` | Stage 2 PyTorch Autoencoder artifact |
-| `SCALER_PATH` | `ml/artifacts/scaler.pkl` | StandardScaler pickle artifact |
-| `AUTOENCODER_THRESHOLD` | `0.05298595` | Anomaly reconstruction threshold |
 | `STAGE1_CONFIDENCE_THRESHOLD` | `0.70` | Confidence threshold for Stage 1 |
 | `JWT_SECRET_KEY` | `ids-enterprise-soc-secret-key-2026` | JWT signature secret |
 | `LOG_LEVEL` | `info` | Logger verbosity |
-| `VITE_API_URL` | `http://localhost:8000` | Frontend API URL |
 
 ---
 
