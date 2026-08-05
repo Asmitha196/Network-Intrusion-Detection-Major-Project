@@ -1,0 +1,8 @@
+# =============================================================================
+# Docker has been completely removed from this project.
+# This project now runs natively as a fully local development application.
+# Refer to README.md for local startup instructions:
+#   Backend:  uvicorn api.main:app --reload
+#   Frontend: npm run dev
+#   Worker:   python -m workers.flow_consumer
+# =============================================================================

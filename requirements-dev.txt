@@ -1,0 +1,13 @@
+# =============================================================================
+# Development & Testing extras — install with:
+#   pip install -r requirements.txt -r requirements-dev.txt
+# =============================================================================
+
+-r requirements.txt
+
+pytest==8.2.0
+pytest-asyncio==0.23.6
+httpx==0.27.0           # async test client for FastAPI
+black==24.4.2
+ruff==0.4.4
+mypy==1.10.0

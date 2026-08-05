@@ -1,0 +1,2 @@
+# Docker has been completely removed from this project.
+# Run natively: python -m workers.flow_consumer
