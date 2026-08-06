@@ -72,5 +72,9 @@ data/cicids2017/
 # Large CSV datasets
 *.csv
 
+# Database dumps & local runtime data
+dump.rdb
+redis/
+
 # Keep only sample data if needed
 !data/sample*
