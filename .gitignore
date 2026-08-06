@@ -27,13 +27,15 @@ ENV/
 # =============================================================================
 # ML model artifacts — never commit trained weights
 # =============================================================================
-ml/artifacts/*.ubj
-ml/artifacts/*.keras
-ml/artifacts/*.pkl
-ml/artifacts/*.joblib
-ml/artifacts/*.h5
-ml/artifacts/*.pt
-ml/artifacts/*.onnx
+*.ubj
+*.keras
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.onnx
+backend/ml/artifacts/*.joblib
+backend/ml/artifacts/*.pt
 
 # =============================================================================
 # Testing & coverage
@@ -70,6 +72,7 @@ redis/
 
 # Large datasets
 data/cicids2017/
+backend/data/cicids2017/
 
 # PCAP files
 *.pcap
@@ -80,3 +83,4 @@ data/cicids2017/
 
 # Keep only sample data if needed
 !data/sample*
+!backend/data/sample*
