@@ -30,6 +30,7 @@ ENV/
 ml/artifacts/*.ubj
 ml/artifacts/*.keras
 ml/artifacts/*.pkl
+ml/artifacts/*.joblib
 ml/artifacts/*.h5
 ml/artifacts/*.pt
 ml/artifacts/*.onnx
@@ -51,7 +52,7 @@ frontend/dist/
 frontend/.vite/
 
 # =============================================================================
-# Docker
+# Docker & logs
 # =============================================================================
 *.log
 
@@ -62,6 +63,11 @@ frontend/.vite/
 .idea/
 *.DS_Store
 Thumbs.db
+
+# Database dumps & local runtime data
+dump.rdb
+redis/
+
 # Large datasets
 data/cicids2017/
 
@@ -71,10 +77,6 @@ data/cicids2017/
 
 # Large CSV datasets
 *.csv
-
-# Database dumps & local runtime data
-dump.rdb
-redis/
 
 # Keep only sample data if needed
 !data/sample*
