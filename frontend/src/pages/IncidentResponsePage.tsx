@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import apiClient from '../api/client'
-import type { AuditLog, IncidentRules } from '../types'
+import type { AuditLog, IncidentRules, ResponseRecommendation } from '../types'
 
 export default function IncidentResponsePage() {
   const [blockIpInput, setBlockIpInput] = useState<string>('')
@@ -9,17 +9,20 @@ export default function IncidentResponsePage() {
   const [confirmed, setConfirmed] = useState<boolean>(false)
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
   const [rules, setRules] = useState<IncidentRules>({ firewall_rules: [], whitelist: [], blacklist: [] })
+  const [recommendations, setRecommendations] = useState<ResponseRecommendation[]>([])
   const [msg, setMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const fetchRulesAndLogs = async () => {
     try {
-      const [logsRes, rulesRes] = await Promise.all([
+      const [logsRes, rulesRes, recRes] = await Promise.all([
         apiClient.get<AuditLog[]>('/incident/audit-logs'),
         apiClient.get<IncidentRules>('/incident/rules'),
+        apiClient.get<ResponseRecommendation[]>('/incident/recommendations'),
       ])
       setAuditLogs(logsRes.data || [])
       setRules(rulesRes.data || { firewall_rules: [], whitelist: [], blacklist: [] })
+      setRecommendations(recRes.data || [])
     } catch (e) {
       console.warn('Failed to fetch incident data:', e)
     }
@@ -28,6 +31,13 @@ export default function IncidentResponsePage() {
   useEffect(() => {
     fetchRulesAndLogs()
   }, [])
+
+  const handleApplyRecommendation = (rec: ResponseRecommendation) => {
+    setBlockIpInput(rec.source_ip)
+    setReasonInput(`[Recommended Action] ${rec.recommended_action} - ${rec.reason}`)
+    setConfirmed(true)
+    setMsg(`Recommendation for ${rec.source_ip} pre-filled below. Click 'Apply OS Firewall Block Rule' after final analyst review.`)
+  }
 
   const handleBlockIp = async () => {
     if (!blockIpInput || !reasonInput || !confirmed) {
@@ -67,6 +77,57 @@ export default function IncidentResponsePage() {
 
       {msg && <div style={styles.successBox}>{msg}</div>}
       {error && <div style={styles.errorBox}>{error}</div>}
+
+      {/* Recommended Actions Panel */}
+      <div style={{ backgroundColor: '#0d1117', border: '1px solid #30363d', borderRadius: '8px', padding: '20px' }}>
+        <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#f0f6fc', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          🛡️ SYSTEM RECOMMENDED ACTIONS (ANALYST APPROVAL MANDATORY)
+        </h3>
+
+        {recommendations.length === 0 ? (
+          <div style={{ color: '#8b949e', fontSize: '13px', textAlign: 'center', padding: '16px' }}>
+            No active containment recommendations. System status nominal.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {recommendations.slice(0, 5).map((rec) => (
+              <div key={rec.id} style={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                <div style={{ flex: 1, minWidth: '280px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '15px', color: '#58a6ff' }}>{rec.source_ip}</span>
+                    <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', backgroundColor: rec.risk_score >= 80 ? '#3d1419' : '#362112', color: rec.risk_score >= 80 ? '#ff7b72' : '#ffa657', border: '1px solid' }}>
+                      RISK {rec.risk_score}/100 ({rec.risk_level})
+                    </span>
+                  </div>
+
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#f0f6fc', marginBottom: '4px' }}>
+                    RECOMMENDED ACTION: <span style={{ color: '#ffa657' }}>{rec.recommended_action}</span>
+                  </div>
+
+                  <div style={{ fontSize: '12px', color: '#8b949e', marginBottom: '8px' }}>
+                    <strong>Reason:</strong> {rec.reason}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '12px', fontSize: '11px', color: '#8b949e' }}>
+                    <span>Alerts: <strong style={{ color: '#c9d1d9' }}>{rec.related_evidence.total_alerts}</strong></span>
+                    <span>Decoy Hits: <strong style={{ color: '#d29922' }}>{rec.related_evidence.honeypot_interactions}</strong></span>
+                    <span>Attack Vectors: <strong style={{ color: '#58a6ff' }}>{rec.related_evidence.attack_types.join(', ') || 'Anomaly'}</strong></span>
+                  </div>
+                </div>
+
+                <div>
+                  <button
+                    onClick={() => handleApplyRecommendation(rec)}
+                    style={{ backgroundColor: '#238636', color: '#ffffff', border: 'none', borderRadius: '6px', padding: '8px 16px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                  >
+                    Approve & Pre-fill Block Form
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div style={styles.twoCol}>
         {/* Block IP Form */}
@@ -118,7 +179,9 @@ export default function IncidentResponsePage() {
             <span style={styles.listTitle}>Blacklisted Threat IPs ({rules.blacklist?.length || 0}):</span>
             <div style={styles.tagGroup}>
               {rules.blacklist?.map((ip: string) => (
-                <span key={ip} style={styles.blackTag}>{ip}</span>
+                <span key={ip} style={styles.blackTag}>
+                  🛑 {ip} <span style={{ color: '#ff7b72', fontSize: '11px', marginLeft: '4px', fontWeight: 700 }}>(Risk: 85/100)</span>
+                </span>
               ))}
             </div>
 

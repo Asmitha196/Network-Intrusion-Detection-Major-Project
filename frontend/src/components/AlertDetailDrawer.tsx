@@ -10,6 +10,7 @@ import {
 } from 'recharts'
 import type { Alert } from '../types'
 import apiClient from '../api/client'
+import { getNaturalLanguageExplanation } from '../utils/shapExplanations'
 
 interface AlertDetailDrawerProps {
   alert: Alert | null
@@ -98,8 +99,15 @@ export const AlertDetailDrawer: FC<AlertDetailDrawerProps> = ({
             </div>
 
             <div style={styles.metaItem}>
-              <span style={styles.metaLabel}>Confidence Score</span>
+              <span style={styles.metaLabel}>ML Model Confidence</span>
               <span style={styles.metaValue}>{(alert.confidence * 100).toFixed(1)}%</span>
+            </div>
+
+            <div style={{ ...styles.metaItem, borderLeft: '3px solid #388bfd' }}>
+              <span style={styles.metaLabel}>Security Risk Score (0-100)</span>
+              <span style={{ ...styles.metaValue, color: '#58a6ff', fontWeight: 700 }}>
+                {alert.risk_score !== undefined ? `${alert.risk_score}/100 (${alert.risk_level || 'MED'})` : `${Math.round(alert.confidence * 85)}/100`}
+              </span>
             </div>
           </div>
 
@@ -128,6 +136,61 @@ export const AlertDetailDrawer: FC<AlertDetailDrawerProps> = ({
                 <div style={styles.timeValue}>{alert.timestamp}</div>
               </div>
             </div>
+          </div>
+
+          {/* WHY WAS THIS ALERT GENERATED? */}
+          <div style={{ ...styles.section, backgroundColor: '#0d1117', border: '1px solid #30363d', borderRadius: '8px', padding: '16px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#f0f6fc', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              🔍 WHY WAS THIS ALERT GENERATED?
+            </h3>
+
+            {shapData.length === 0 ? (
+              <div style={styles.noShapText}>SHAP feature values unavailable for this flow record.</div>
+            ) : (
+              <div>
+                {/* Top Contributing Feature Impact Bars */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
+                  {shapData.slice(0, 5).map((item, idx) => {
+                    const maxVal = shapData[0]?.importance || 1;
+                    const pct = Math.min(100, Math.max(10, (item.importance / maxVal) * 100));
+                    const valStr = item.value >= 0 ? `+${item.value.toFixed(2)}` : `${item.value.toFixed(2)}`;
+
+                    return (
+                      <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 600 }}>
+                          <span style={{ color: '#c9d1d9' }}>{item.fullName}</span>
+                          <span style={{ color: idx < 2 ? '#ff7b72' : '#ffa657', fontFamily: 'monospace' }}>{valStr}</span>
+                        </div>
+                        <div style={{ height: '8px', backgroundColor: '#21262d', borderRadius: '4px', overflow: 'hidden' }}>
+                          <div
+                            style={{
+                              height: '100%',
+                              width: `${pct}%`,
+                              backgroundColor: idx === 0 ? '#ff7b72' : idx === 1 ? '#ffa657' : '#58a6ff',
+                              borderRadius: '4px',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Natural Language Explanations Box */}
+                <div style={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '12px' }}>
+                  <h5 style={{ fontSize: '11px', fontWeight: 700, color: '#8b949e', margin: '0 0 8px 0', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    PLAIN-ENGLISH THREAT DRIVERS:
+                  </h5>
+                  <ul style={{ margin: 0, paddingLeft: '18px', color: '#c9d1d9', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {shapData.slice(0, 4).map((item, idx) => (
+                      <li key={idx}>
+                        <strong>{item.fullName}</strong>: {getNaturalLanguageExplanation(item.fullName)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Feature Importance / SHAP Explanation Chart */}

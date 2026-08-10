@@ -30,7 +30,7 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 @router.get("", summary="Get comprehensive SOC Threat Analytics (alias)")
 @router.get("/overview", summary="Get comprehensive SOC Threat Analytics")
 async def get_analytics_overview(
-    window: str = Query(default="24h", regex="^(1h|24h|7d|30d)$"),
+    window: str = Query(default="24h", pattern="^(1h|24h|7d|30d)$"),
     session: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """

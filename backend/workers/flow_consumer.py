@@ -152,8 +152,35 @@ async def _process_message(
                 shap_values=alert.get("shap_values"),
                 raw_features=alert.get("raw_features", {}),
             )
+            
+            # Check if source IP touched honeypot and enrich alert metadata
+            await enrich_alert_with_honeypot(
+                alert=alert_row,
+                session=session,
+                src_ip=flow_record.src_ip,
+                time_window_minutes=15
+            )
+
             session.add(alert_row)
             await session.commit()
+
+            # Correlate alert into high-level Security Incident
+            from analytics.correlation_engine import correlate_alert
+            await correlate_alert(
+                alert=alert_row,
+                src_ip=flow_record.src_ip,
+                dst_ip=flow_record.dst_ip,
+                session=session,
+                time_window_minutes=5
+            )
+            await session.commit()
+
+            # Pass enriched tags and threat_intel to websocket alert dict
+            if alert_row.tags:
+                alert["tags"] = alert_row.tags
+            if alert_row.threat_intel:
+                alert["threat_intel"] = alert_row.threat_intel
+                
             logger.info("Persisted FlowRecord %s and Alert %s (Stage %d, %s)", flow_record.id, alert_row.id, alert_row.stage, alert_row.attack_type or "Anomaly")
 
         # --- Step 5: WebSocket broadcast ----------------------------------------

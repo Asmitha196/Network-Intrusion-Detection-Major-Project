@@ -132,7 +132,7 @@ async def generate_report(
 @router.get("/{report_id}/export", summary="Export SOC Report as PDF, CSV, or JSON")
 async def export_report(
     report_id: uuid.UUID,
-    export_format: str = Query(default="json", regex="^(json|csv|pdf)$"),
+    export_format: str = Query(default="json", pattern="^(json|csv|pdf)$"),
     session: AsyncSession = Depends(get_db),
 ):
     """Export report in requested format: json, csv, or pdf."""

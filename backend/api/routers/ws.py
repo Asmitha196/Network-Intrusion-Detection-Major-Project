@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.orm import selectinload
 
 from db.session import AsyncSessionLocal

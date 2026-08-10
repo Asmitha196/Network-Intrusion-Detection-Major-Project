@@ -7,6 +7,7 @@ import AttackDistribution from '../components/AttackDistribution'
 import RecentAlertsTable from '../components/RecentAlertsTable'
 import CriticalAlertsPanel from '../components/CriticalAlertsPanel'
 import AlertDetailDrawer from '../components/AlertDetailDrawer'
+import { SecurityIntelligencePanel } from '../components/SecurityIntelligencePanel'
 import apiClient from '../api/client'
 
 import type {
@@ -18,7 +19,7 @@ import type {
 } from '../types'
 
 export default function Dashboard() {
-  const { alerts } = useAlerts()
+  const { alerts, lastMessage } = useAlerts()
   const [health, setHealth] = useState<SystemHealth | null>(null)
   const [overview, setOverview] = useState<MetricsOverview | null>(null)
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
@@ -70,6 +71,11 @@ export default function Dashboard() {
       {/* 1. System Health Status Cards */}
       <section style={styles.section}>
         <StatusCards health={health} overview={overview} />
+      </section>
+
+      {/* 1.5 Security Intelligence & Decoy Telemetry Panel */}
+      <section style={styles.section}>
+        <SecurityIntelligencePanel alerts={alerts} lastMessage={lastMessage} />
       </section>
 
       {/* 2. Attack Timeline & 3. Attack Distribution */}

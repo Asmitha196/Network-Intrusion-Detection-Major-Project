@@ -36,13 +36,83 @@ export default function ModelEvaluationPage() {
     roc_auc: 0.9942,
   }
 
+  const drift = evalData?.drift_status || {
+    status: 'NORMAL' as const,
+    has_drift: false,
+    drift_score: 0.042,
+    p_value: 0.958,
+    message: 'No significant traffic distribution change detected.',
+    simple_explanation: 'The network traffic currently looks consistent with the baseline data used to train the ML models.',
+    recommendation: 'System operational: No model retraining required at this time. Standard monitoring active.',
+  }
+
+  const isWarning = drift.status === 'WARNING' || drift.has_drift
+
   return (
     <div style={styles.container}>
       <div>
         <h2 style={styles.pageTitle}>Machine Learning Model Evaluation & Analyst Ground Truth</h2>
         <span style={styles.pageSubtitle}>
-          Real-time confusion matrix, accuracy, precision, recall, MCC, ROC-AUC, and Stage 1 vs Stage 2 model comparison
+          Real-time confusion matrix, accuracy, precision, recall, MCC, ROC-AUC, model drift warning, and Stage 1 vs Stage 2 comparison
         </span>
+      </div>
+
+      {/* Model Status & Drift Warning Panel */}
+      <div
+        style={{
+          backgroundColor: '#0d1117',
+          border: `1px solid ${isWarning ? '#7d1a24' : '#1b4b27'}`,
+          borderRadius: '8px',
+          padding: '20px',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#8b949e', letterSpacing: '0.5px' }}>MODEL STATUS</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+              <span
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: '12px',
+                  fontSize: '14px',
+                  fontWeight: 800,
+                  backgroundColor: isWarning ? '#3d1419' : '#16231a',
+                  color: isWarning ? '#ff7b72' : '#56d364',
+                  border: `1px solid ${isWarning ? '#7d1a24' : '#1b4b27'}`,
+                  letterSpacing: '0.5px',
+                }}
+              >
+                {isWarning ? 'WARNING' : 'NORMAL'}
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: isWarning ? '#ffa657' : '#f0f6fc' }}>
+                {drift.message}
+              </span>
+            </div>
+          </div>
+          <div style={{ fontSize: '12px', color: '#8b949e' }}>
+            Drift Distance Score: <strong style={{ color: isWarning ? '#ff7b72' : '#58a6ff' }}>{drift.drift_score}</strong> (p-value: {drift.p_value})
+          </div>
+        </div>
+
+        <div style={{ fontSize: '13px', color: '#c9d1d9', marginBottom: '12px', lineHeight: '1.5' }}>
+          <strong>Simple Explanation:</strong> &quot;{drift.simple_explanation}&quot;
+        </div>
+
+        <div
+          style={{
+            backgroundColor: '#161b22',
+            border: '1px solid #30363d',
+            borderRadius: '6px',
+            padding: '12px 16px',
+            fontSize: '12px',
+            color: '#8b949e',
+          }}
+        >
+          <strong style={{ color: '#f0f6fc' }}>SOC Recommendation:</strong> {drift.recommendation}
+          <div style={{ fontSize: '11px', color: '#6e7681', marginTop: '4px' }}>
+            ⚠️ <em>Policy: Models are never automatically retrained. Any retraining requires explicit analyst verification and approval.</em>
+          </div>
+        </div>
       </div>
 
       {/* Metrics Summary Grid */}

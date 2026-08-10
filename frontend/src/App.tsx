@@ -12,6 +12,9 @@ import AlertsPage from './pages/AlertsPage'
 import TrafficPage from './pages/TrafficPage'
 import ReplayPage from './pages/ReplayPage'
 import MetricsPage from './pages/MetricsPage'
+import { AttackerProfilesPage } from './pages/AttackerProfilesPage'
+import { CorrelatedIncidentsPage } from './pages/CorrelatedIncidentsPage'
+import HoneypotPage from './pages/HoneypotPage'
 import SettingsPage from './pages/SettingsPage'
 import { useWebSocket } from './hooks/useWebSocket'
 import type { WebSocketMessage } from './types'
@@ -27,6 +30,9 @@ export default function App() {
           <Navbar activePage="Enterprise Security Operations Center (SOC)" />
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/correlated-incidents" element={<CorrelatedIncidentsPage />} />
+            <Route path="/attackers" element={<AttackerProfilesPage />} />
+            <Route path="/honeypot" element={<HoneypotPage />} />
             <Route path="/threat-intel" element={<ThreatIntelPage />} />
             <Route path="/incident" element={<IncidentResponsePage />} />
             <Route path="/simulation" element={<SimulationPage />} />

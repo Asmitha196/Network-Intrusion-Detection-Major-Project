@@ -334,7 +334,7 @@ class FlowBuilder:
                 src_port, dst_port = tcp.sport, tcp.dport
                 proto = "TCP"
                 flags = str(tcp.flags)
-                hdr_len = getattr(tcp, "dataofs", 5) * 4
+                hdr_len = (tcp.dataofs if getattr(tcp, "dataofs", None) is not None else 5) * 4
                 payload_len = len(tcp.payload) if tcp.payload else 0
                 win_size = int(getattr(tcp, "window", 0))
             elif packet.haslayer(UDP):

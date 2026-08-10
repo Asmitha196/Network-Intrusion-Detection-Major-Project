@@ -30,6 +30,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/incident", tags=["incident-response"])
 
+
+@router.get("/recommendations", summary="Get Contextual Response Recommendations")
+async def get_response_recommendations_endpoint(
+    session: AsyncSession = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """Generate non-automated containment recommendations requiring explicit analyst approval."""
+    from analytics.recommendation_engine import generate_response_recommendations
+    try:
+        return await generate_response_recommendations(session=session, limit=50)
+    except Exception as e:
+        logger.error("Error generating response recommendations: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate response recommendations: {e}",
+        )
+
 # In-memory Whitelist / Blacklist state for active response
 _WHITELIST: set[str] = {"127.0.0.1", "192.168.1.1"}
 _BLACKLIST: set[str] = set()

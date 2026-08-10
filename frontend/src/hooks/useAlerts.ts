@@ -60,5 +60,5 @@ export function useAlerts() {
     }
   }, [lastMessage])
 
-  return { alerts, readyState }
+  return { alerts, readyState, lastMessage }
 }

@@ -78,8 +78,8 @@ async def list_alerts(
     min_confidence: Optional[float] = Query(default=None, ge=0.0, le=1.0, description="Minimum confidence threshold"),
     start_ts: Optional[datetime] = Query(default=None, description="Filter alerts after timestamp (ISO 8601)"),
     end_ts: Optional[datetime] = Query(default=None, description="Filter alerts before timestamp (ISO 8601)"),
-    sort_by: str = Query(default="timestamp", regex="^(timestamp|confidence|severity)$", description="Field to sort by"),
-    order: str = Query(default="desc", regex="^(asc|desc)$", description="Sort order (asc/desc)"),
+    sort_by: str = Query(default="timestamp", pattern="^(timestamp|confidence|severity)$", description="Field to sort by"),
+    order: str = Query(default="desc", pattern="^(asc|desc)$", description="Sort order (asc/desc)"),
     db: AsyncSession = Depends(get_db),
 ) -> AlertListResponse:
     """

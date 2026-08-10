@@ -3,6 +3,19 @@ import axios from 'axios'
 import apiClient from '../api/client'
 import type { ThreatIntelData } from '../types'
 
+function isValidIpAddress(rawIp: string): boolean {
+  const ip = rawIp.trim()
+  if (!ip) return false
+
+  // IPv4 regex (4 octets 0-255)
+  const ipv4Pattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+  if (ipv4Pattern.test(ip)) return true
+
+  // IPv6 regex
+  const ipv6Pattern = /^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^(?:[0-9a-fA-F]{1,4}:){1,7}:|^:(?::[0-9a-fA-F]{1,4}){1,7}$|^(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}$|^(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}$|^(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}$|^(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}$|^(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}$|^[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}$|^::$/
+  return ipv6Pattern.test(ip)
+}
+
 export default function ThreatIntelPage() {
   const [ipInput, setIpInput] = useState<string>('185.220.101.5')
   const [intel, setIntel] = useState<ThreatIntelData | null>(null)
@@ -10,13 +23,19 @@ export default function ThreatIntelPage() {
   const [error, setError] = useState<string | null>(null)
 
   const handleLookup = async (ipToSearch?: string) => {
-    const target = ipToSearch || ipInput
-    if (!target) return
+    const rawTarget = ipToSearch !== undefined ? ipToSearch : ipInput
+    const target = rawTarget.trim()
+
+    if (!isValidIpAddress(target)) {
+      setError('Invalid IP address. Please enter a valid IPv4 or IPv6 address.')
+      setIntel(null)
+      return
+    }
 
     setLoading(true)
     setError(null)
     try {
-      const res = await apiClient.get<ThreatIntelData>(`/threat-intel/lookup/${target.trim()}`)
+      const res = await apiClient.get<ThreatIntelData>(`/threat-intel/lookup/${target}`)
       setIntel(res.data)
     } catch (e) {
       if (axios.isAxiosError(e) && e.response?.data?.detail) {
@@ -46,6 +65,7 @@ export default function ThreatIntelPage() {
           placeholder="Enter IPv4 / IPv6 address (e.g. 185.220.101.5)..."
           value={ipInput}
           onChange={(e) => setIpInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleLookup() }}
         />
         <button style={styles.button} onClick={() => handleLookup()} disabled={loading}>
           {loading ? 'Searching...' : 'Enrich Threat Intel'}

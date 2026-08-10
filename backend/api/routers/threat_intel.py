@@ -62,6 +62,17 @@ async def lookup_ip_intelligence(
     Abuse Score, Reputation, Last Reported, Threat Category, Known Malicious flag).
     Automatically skips RFC1918 private IPs.
     """
+    # 0. Validate IPv4 / IPv6 format
+    target_ip = ip_address.strip()
+    try:
+        ip_obj = ipaddress.ip_address(target_ip)
+        ip_address = str(ip_obj)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid IP address. Please enter a valid IPv4 or IPv6 address.",
+        )
+
     # 1. Private IP Check
     if is_private_ip(ip_address):
         return {

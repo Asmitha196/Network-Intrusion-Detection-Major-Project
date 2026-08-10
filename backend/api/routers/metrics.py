@@ -118,7 +118,7 @@ async def get_metrics_overview(
 async def get_metrics_timeline(
     interval: str = Query(
         default="5m",
-        regex="^(1m|5m|1h|1d)$",
+        pattern="^(1m|5m|1h|1d)$",
         description="Bucket aggregation interval: 1m, 5m, 1h, 1d",
     ),
     start_ts: datetime | None = Query(

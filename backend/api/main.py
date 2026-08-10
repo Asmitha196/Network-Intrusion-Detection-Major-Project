@@ -31,9 +31,12 @@ from api.middleware import RequestIDMiddleware, SecurityHeadersMiddleware
 from api.routers import (
     alerts,
     analytics,
+    attacker_profiles,
     auth,
     evaluation,
     health,
+    honeypot,
+    incidents,
     incident_response,
     ingestion,
     metrics,
@@ -47,6 +50,7 @@ from api.routers import (
 from db.session import engine
 from db.init_db import init_db
 from ingestion.capture import LiveCaptureEngine
+from honeypot.decoy_server import get_decoy_server
 
 # ---------------------------------------------------------------------------
 # Structured logging setup
@@ -77,10 +81,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     redis_pool = get_redis_pool()
     logger.info("Redis pool initialised at %s", get_redis_url())
 
+    # Safely start local Decoy HTTP Server
+    try:
+        decoy = get_decoy_server()
+        await decoy.start()
+    except Exception as e:
+        logger.warning("Decoy server startup note: %s", e)
+
     yield  # Application runs here
 
     # Shutdown
     logger.info("Shutting down IDS API...")
+    try:
+        await get_decoy_server().stop()
+    except Exception:
+        pass
     LiveCaptureEngine().stop()
     await redis_pool.aclose()
     await engine.dispose()
@@ -141,6 +156,9 @@ def create_app() -> FastAPI:
     # --- REST routers --------------------------------------------------------
     app.include_router(auth.router)
     app.include_router(health.router)
+    app.include_router(honeypot.router)
+    app.include_router(attacker_profiles.router)
+    app.include_router(incidents.router)
     app.include_router(ingestion.router)
     app.include_router(prediction.router)
     app.include_router(prediction.router, prefix="/prediction", tags=["prediction"])
@@ -162,3 +180,4 @@ def create_app() -> FastAPI:
 
 # Module-level app instance — referenced by uvicorn
 app = create_app()
+

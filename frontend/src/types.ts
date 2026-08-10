@@ -2,7 +2,7 @@
  * Shared TypeScript type definitions for Enterprise SOC IDS Platform.
  */
 
-export type SeverityLevel = 'low' | 'medium' | 'high' | 'critical'
+export type SeverityLevel = 'low' | 'medium' | 'high' | 'critical' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 
 export interface ShapExplanation {
   feature_names: string[]
@@ -33,6 +33,8 @@ export interface Alert {
   notes?: string
   tags?: string[]
   reviewed?: boolean
+  risk_score?: number
+  risk_level?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
   feedback_label?: string
   threat_intel?: ThreatIntelData
 }
@@ -171,6 +173,21 @@ export interface AuditLog {
   details: Record<string, unknown>
 }
 
+export interface ModelDriftStatus {
+  status: 'NORMAL' | 'WARNING'
+  has_drift: boolean
+  drift_score: number
+  p_value: number
+  message: string
+  simple_explanation: string
+  recommendation: string
+  metrics_evaluated?: {
+    recent_alerts_sample: number
+    stage2_zero_day_ratio: number
+    false_positive_ratio: number
+  }
+}
+
 export interface ModelEvaluationMetrics {
   confusion_matrix: {
     tp: number
@@ -193,6 +210,7 @@ export interface ModelEvaluationMetrics {
   }
   roc_curve: Array<{ fpr: number; tpr: number }>
   precision_recall_curve: Array<{ recall: number; precision: number }>
+  drift_status?: ModelDriftStatus
   feedback_counts: {
     total_analyst_reviews: number
     confirmed_attacks: number
@@ -259,8 +277,137 @@ export interface AnalyticsOverview {
   top_ports: Array<{ port: number; count: number }>
 }
 
+export interface AttackerProfile {
+  source_ip: string
+  first_seen: string
+  last_seen: string
+  total_alerts: number
+  attack_types: string[]
+  port_scan_count: number
+  brute_force_count: number
+  honeypot_interactions: number
+  critical_alerts: number
+  high_alerts: number
+  medium_alerts: number
+  low_alerts: number
+  risk_score: number
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  threat_intelligence?: {
+    ip?: string
+    country?: string
+    country_code?: string
+    isp?: string
+    reputation_score?: number
+    is_malicious?: boolean
+  }
+  recent_activity?: Array<{
+    id: string
+    timestamp: string
+    type: 'ALERT' | 'HONEYPOT'
+    attack_type?: string
+    event_type?: string
+    severity: string
+    dst_ip?: string
+    dst_port?: number
+    request_type?: string
+  }>
+}
+
+export interface CorrelatedIncident {
+  id: string
+  title: string
+  source_ip: string
+  destination_ip?: string
+  start_time: string
+  last_activity: string
+  alert_count: number
+  attack_types: string[]
+  honeypot_interactions: number
+  risk_score: number
+  status: 'NEW' | 'INVESTIGATING' | 'RESOLVED'
+  created_at?: string
+  linked_alerts?: Alert[]
+  honeypot_events?: Array<{
+    id: string
+    timestamp: string
+    event_type: string
+    severity: string
+    service: string
+    request_type: string
+  }>
+}
+
+export interface ResponseRecommendation {
+  id: string
+  source_ip: string
+  recommended_action: string
+  reason: string
+  risk_score: number
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  related_evidence: {
+    total_alerts: number
+    port_scan_count: number
+    brute_force_count: number
+    honeypot_interactions: number
+    critical_alerts: number
+    attack_types: string[]
+  }
+  suggested_command: string
+  requires_analyst_approval: boolean
+}
+
 export type WebSocketMessage =
   | { type: 'connected'; channel: string; recent_alerts?: Alert[] }
   | { type: 'ping' }
+  | { type: 'honeypot_event'; event: HoneypotEvent }
+  | { type: 'correlated_incident'; incident: CorrelatedIncident }
+  | { type: 'risk_score_update'; source_ip: string; risk_score: number; risk_level: string }
   | Alert
   | TrafficStats
+
+export interface HoneypotStatus {
+  status: 'running' | 'stopped'
+  host: string
+  port: number
+  service: string
+  total_interactions_session: number
+  total_events_database: number
+  uptime_seconds: number
+}
+
+export interface HoneypotStats {
+  by_event_type: Record<string, number>
+  by_severity: Record<string, number>
+  top_attackers: Array<{ ip: string; count: number }>
+}
+
+export interface HoneypotEvent {
+  id: string
+  timestamp: string
+  src_ip: string
+  src_port: number
+  dst_ip: string
+  dst_port: number
+  protocol: string
+  service: string
+  request_type: string
+  event_type: string
+  severity: string
+  session_id?: string | null
+  payload?: Record<string, unknown> | null
+}
+
+export interface HoneypotCorrelatedAlert {
+  id: string
+  timestamp: string
+  src_ip: string
+  dst_ip: string
+  attack_type: string
+  stage: number
+  severity: string
+  confidence: number
+  tags?: string[]
+  honeypot_evidence?: Record<string, unknown> | null
+}
+
+

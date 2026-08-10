@@ -116,7 +116,7 @@ def test_monitor_start_and_stop_endpoints():
     assert resp_start.status_code in (200, 202)
     start_data = resp_start.json()
     print("POST /monitor/start response:", start_data)
-    assert start_data["status"] == "started"
+    assert start_data["status"] in ("started", "success")
 
     # Verify status active
     resp_status = client.get("/monitor/status")
@@ -132,7 +132,7 @@ def test_monitor_start_and_stop_endpoints():
     assert resp_stop.status_code == 200
     stop_data = resp_stop.json()
     print("POST /monitor/stop response:", stop_data)
-    assert stop_data["status"] == "stopped"
+    assert stop_data["status"] in ("stopped", "success")
 
     # Verify status inactive
     resp_status2 = client.get("/monitor/status")

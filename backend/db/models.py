@@ -185,3 +185,77 @@ class Report(Base):
     report_type: Mapped[str] = mapped_column(String(32), nullable=False) # daily, weekly, monthly, custom
     title: Mapped[str] = mapped_column(String(128), nullable=False)
     summary: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class HoneypotEvent(Base):
+    """
+    Decoy Server Interaction Event.
+    Records incoming connections, HTTP probes, and suspicious requests to decoy services.
+    """
+
+    __tablename__ = "honeypot_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    src_ip: Mapped[str] = mapped_column(String(45), nullable=False, index=True)
+    src_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    dst_ip: Mapped[str] = mapped_column(String(45), nullable=False)
+    dst_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    protocol: Mapped[str] = mapped_column(String(10), nullable=False, default="TCP")
+    service: Mapped[str] = mapped_column(String(32), nullable=False, default="http-decoy")
+    request_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True) # CONNECTION_ATTEMPT, HTTP_PROBE, SUSPICIOUS_REQUEST, REPEATED_REQUEST
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, index=True) # LOW, MEDIUM, HIGH, CRITICAL
+    session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<HoneypotEvent id={self.id} event_type={self.event_type} "
+            f"src={self.src_ip}:{self.src_port} -> dst={self.dst_ip}:{self.dst_port} "
+            f"severity={self.severity}>"
+        )
+
+
+class CorrelatedIncident(Base):
+    """
+    Correlated Security Incident Entity.
+    Groups related NIDS alerts and honeypot decoy events from a target source IP within a sliding time window.
+    """
+
+    __tablename__ = "correlated_incidents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_ip: Mapped[str] = mapped_column(String(45), nullable=False, index=True)
+    destination_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    last_activity: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    alert_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    attack_types: Mapped[List[str]] = mapped_column(JSONB, nullable=False, default=list)
+    honeypot_interactions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    risk_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="NEW", index=True) # NEW, INVESTIGATING, RESOLVED
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<CorrelatedIncident id={self.id} src={self.source_ip} status={self.status} risk={self.risk_score}>"
+
+
+class IncidentAlertLink(Base):
+    """
+    Relational link table joining CorrelatedIncidents to individual Alert records without data duplication.
+    """
+
+    __tablename__ = "incident_alert_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("correlated_incidents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    alert_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
