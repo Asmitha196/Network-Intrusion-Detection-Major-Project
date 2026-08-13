@@ -150,7 +150,7 @@ async def _compute_drift_status(session: AsyncSession) -> Dict[str, Any]:
     res_alerts = await session.execute(stmt_alerts)
     alerts = res_alerts.scalars().all()
 
-    stmt_fb = select(AnalystFeedback).order_by(desc(AnalystFeedback.timestamp)).limit(50)
+    stmt_fb = select(AnalystFeedback).order_by(desc(AnalystFeedback.created_at)).limit(50)
     res_fb = await session.execute(stmt_fb)
     feedback = res_fb.scalars().all()
 

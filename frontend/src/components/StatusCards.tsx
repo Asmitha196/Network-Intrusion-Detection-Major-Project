@@ -38,18 +38,6 @@ export const StatusCards: React.FC<StatusCardsProps> = ({ health, overview }) =>
         <div style={styles.cardSubtext}>High priority action needed</div>
       </div>
 
-      {/* Security Risk Score Card */}
-      <div style={{ ...styles.card, borderColor: '#388bfd' }}>
-        <div style={styles.cardHeader}>
-          <span style={styles.cardTitle}>Security Risk Score</span>
-          <span style={{ ...styles.iconBadge, backgroundColor: 'rgba(56, 139, 253, 0.15)', color: '#58a6ff' }}>🛡️</span>
-        </div>
-        <div style={{ ...styles.cardValue, color: criticalAlerts > 0 ? '#ff7b72' : activeAlerts > 5 ? '#ffa657' : '#56d364' }}>
-          {criticalAlerts > 0 ? '85/100 (CRITICAL)' : activeAlerts > 5 ? '55/100 (MEDIUM)' : '15/100 (LOW)'}
-        </div>
-        <div style={styles.cardSubtext}>Transparent NIDS 0-100 score</div>
-      </div>
-
       {/* 3. Total Flows / Packets */}
       <div style={styles.card}>
         <div style={styles.cardHeader}>

@@ -1,822 +1,372 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { Play, Square, RefreshCw, Bug, ShieldAlert } from 'lucide-react'
 import apiClient from '../api/client'
-import type {
-  HoneypotStatus,
-  HoneypotStats,
-  HoneypotEvent,
-  HoneypotCorrelatedAlert,
-  AttackerProfile,
-} from '../types'
-import { AttackerBehaviorTimeline } from '../components/AttackerBehaviorTimeline'
+import { StatCard, SectionHeader, Panel, SeverityBadge, IP, Table, Tr, Td, EmptyState, LoadingState, Severity } from '../components/ui'
+import { useWebSocket } from '../hooks/useWebSocket'
+import type { HoneypotStatus, HoneypotStats, HoneypotEvent, HoneypotCorrelatedAlert, WebSocketMessage } from '../types'
+
+const SEVERITY_MAP: Record<string, Severity> = {
+  critical: 'CRITICAL',
+  high: 'HIGH',
+  medium: 'MEDIUM',
+  low: 'LOW',
+  CRITICAL: 'CRITICAL',
+  HIGH: 'HIGH',
+  MEDIUM: 'MEDIUM',
+  LOW: 'LOW',
+}
 
 export default function HoneypotPage() {
   const [status, setStatus] = useState<HoneypotStatus | null>(null)
   const [stats, setStats] = useState<HoneypotStats | null>(null)
   const [events, setEvents] = useState<HoneypotEvent[]>([])
   const [correlatedAlerts, setCorrelatedAlerts] = useState<HoneypotCorrelatedAlert[]>([])
-  const [attackerProfiles, setAttackerProfiles] = useState<AttackerProfile[]>([])
-  const [selectedIp, setSelectedIp] = useState<string>('')
-  
-  // Filtering & loading states
   const [loading, setLoading] = useState<boolean>(true)
-  const [error, setError] = useState<string | null>(null)
-  const [actionMsg, setActionMsg] = useState<string | null>(null)
-  const [searchTerm, setSearchTerm] = useState<string>('')
-  const [selectedEventType, setSelectedEventType] = useState<string>('ALL')
-  const [selectedSeverity, setSelectedSeverity] = useState<string>('ALL')
-  const [controlLoading, setControlLoading] = useState<boolean>(false)
+  const [actionLoading, setActionLoading] = useState<boolean>(false)
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; action: 'start' | 'stop' }>({ open: false, action: 'start' })
+  const [selectedIp, setSelectedIp] = useState<string | null>(null)
+  const [ipCorrelation, setIpCorrelation] = useState<any | null>(null)
+  const [ipLoading, setIpLoading] = useState<boolean>(false)
 
-  const fetchData = async () => {
-    setLoading(true)
-    setError(null)
+  // WebSockets stream `/ws/alerts` for real-time correlated alerts
+  const { lastMessage: wsMsg } = useWebSocket<WebSocketMessage>('/ws/alerts')
+
+  // Fetch real honeypot telemetry from backend
+  const fetchHoneypotData = useCallback(async () => {
     try {
-      const [statusRes, statsRes, eventsRes, correlatedRes, profilesRes] = await Promise.all([
+      setLoading(true)
+      const [statusRes, statsRes, eventsRes, correlatedRes] = await Promise.allSettled([
         apiClient.get<HoneypotStatus>('/honeypot/status'),
         apiClient.get<HoneypotStats>('/honeypot/stats'),
-        apiClient.get<HoneypotEvent[]>('/honeypot/events?limit=100'),
-        apiClient.get<HoneypotCorrelatedAlert[]>('/honeypot/correlated-alerts?limit=20'),
-        apiClient.get<AttackerProfile[]>('/attackers?limit=50'),
+        apiClient.get<HoneypotEvent[]>('/honeypot/events?limit=50'),
+        apiClient.get<HoneypotCorrelatedAlert[]>('/honeypot/correlated-alerts'),
       ])
 
-      setStatus(statusRes.data)
-      setStats(statsRes.data)
-      setEvents(eventsRes.data || [])
-      setCorrelatedAlerts(correlatedRes.data || [])
-      setAttackerProfiles(profilesRes.data || [])
-
-      // Auto-select top honeypot attacker IP for timeline if available
-      if (statsRes.data?.top_attackers && statsRes.data.top_attackers.length > 0) {
-        setSelectedIp(statsRes.data.top_attackers[0].ip)
-      } else if (eventsRes.data && eventsRes.data.length > 0) {
-        setSelectedIp(eventsRes.data[0].src_ip)
-      }
-    } catch (err: any) {
+      if (statusRes.status === 'fulfilled') setStatus(statusRes.value.data)
+      if (statsRes.status === 'fulfilled') setStats(statsRes.value.data)
+      if (eventsRes.status === 'fulfilled') setEvents(Array.isArray(eventsRes.value.data) ? eventsRes.value.data : [])
+      if (correlatedRes.status === 'fulfilled') setCorrelatedAlerts(Array.isArray(correlatedRes.value.data) ? correlatedRes.value.data : [])
+    } catch (err) {
       console.error('Failed to load honeypot telemetry:', err)
-      setError('Failed to fetch Honeypot telemetry. Please verify backend service is running.')
     } finally {
       setLoading(false)
     }
-  }
-
-  useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 10000)
-    return () => clearInterval(interval)
   }, [])
 
-  const handleToggleDecoyServer = async (action: 'start' | 'stop') => {
-    setControlLoading(true)
-    setActionMsg(null)
+  useEffect(() => {
+    fetchHoneypotData()
+  }, [fetchHoneypotData])
+
+  // Fetch IP correlation when an IP is selected
+  useEffect(() => {
+    if (!selectedIp) {
+      setIpCorrelation(null)
+      return
+    }
+
+    let isMounted = true
+    setIpLoading(true)
+
+    apiClient.get<any>(`/honeypot/ip-correlation/${encodeURIComponent(selectedIp)}`)
+      .then(res => {
+        if (isMounted) setIpCorrelation(res.data)
+      })
+      .catch(err => {
+        console.error(`Failed to fetch IP correlation for ${selectedIp}:`, err)
+        if (isMounted) setIpCorrelation(null)
+      })
+      .finally(() => {
+        if (isMounted) setIpLoading(false)
+      })
+
+    return () => { isMounted = false }
+  }, [selectedIp])
+
+  // Process incoming real-time WebSocket messages
+  useEffect(() => {
+    if (!wsMsg) return
+    if ('honeypot' in wsMsg || ('service' in wsMsg && 'src_ip' in wsMsg)) {
+      fetchHoneypotData()
+    }
+  }, [wsMsg, fetchHoneypotData])
+
+  // Control Handlers: POST /honeypot/start and POST /honeypot/stop
+  const executeHoneypotToggle = async (action: 'start' | 'stop') => {
     try {
-      await apiClient.post<{ status: string; host?: string; port?: number }>(
-        `/honeypot/${action}`
-      )
-      setActionMsg(`Decoy server ${action === 'start' ? 'started' : 'stopped'} successfully!`)
-      fetchData()
+      setActionLoading(true)
+      setConfirmModal({ open: false, action })
+      if (action === 'stop') {
+        await apiClient.post('/honeypot/stop')
+      } else {
+        await apiClient.post('/honeypot/start')
+      }
+      await fetchHoneypotData()
     } catch (err: any) {
-      console.error(`Failed to ${action} decoy server:`, err)
-      setError(`Failed to ${action} decoy server.`)
+      console.error('Failed to toggle honeypot state:', err)
+      alert(`Honeypot action failed: ${err.response?.data?.detail || err.message}`)
     } finally {
-      setControlLoading(false)
+      setActionLoading(false)
     }
   }
 
-  // Calculate metrics
-  const totalInteractions = status?.total_events_database ?? events.length
-  const uniqueSourcesCount = stats?.top_attackers ? stats.top_attackers.length : new Set(events.map((e) => e.src_ip)).size
-  
-  // Match risk scores for top attackers
-  const highRiskSourcesCount = attackerProfiles.filter(
-    (p) => p.honeypot_interactions > 0 && p.risk_score >= 70
-  ).length
+  const isRunning = Boolean(status?.status === 'running' || status?.running || status?.status === 'active' || status?.status === 'listening')
+  const totalInteractions = status?.total_events_database ?? status?.total_interactions_session ?? events.length
+  const uniqueSources = stats?.top_attackers?.length ?? new Set(events.map(e => e.src_ip)).size
+  const correlatedAlertsCount = correlatedAlerts.length
 
-  const getSeverityBadge = (sev: string) => {
-    const s = sev.toUpperCase()
-    switch (s) {
-      case 'CRITICAL':
-        return { bg: '#3d1419', text: '#ff7b72', border: '#7d1a24' }
-      case 'HIGH':
-        return { bg: '#362112', text: '#ffa657', border: '#844214' }
-      case 'MEDIUM':
-        return { bg: '#2b2c14', text: '#d29922', border: '#695010' }
-      default:
-        return { bg: '#16231a', text: '#56d364', border: '#1b4b27' }
-    }
-  }
+  const serviceColors = ['#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6', '#00f2fe', '#10b981']
 
-  const filteredEvents = events.filter((ev) => {
-    const matchSearch =
-      !searchTerm ||
-      ev.src_ip.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      ev.request_type.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      ev.service.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchType = selectedEventType === 'ALL' || ev.event_type === selectedEventType
-    const matchSev = selectedSeverity === 'ALL' || ev.severity.toUpperCase() === selectedSeverity.toUpperCase()
-    return matchSearch && matchType && matchSev
-  })
+  const activeListenersText = status?.host && status?.port
+    ? `${status.service || 'http-decoy'} (${status.host}:${status.port})`
+    : 'HTTP Decoy (127.0.0.1:8080)'
 
   return (
-    <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <div>
-          <h1 style={styles.title}>Honeypot Decoy Operations Center</h1>
-          <p style={styles.subtitle}>
-            Isolated decoy server telemetry, intruder engagement metrics, targeted decoy services, and threat timelines
-          </p>
+    <div className="space-y-4 select-none">
+
+      {/* ── STAT CARDS & CONTROLS ── */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-4 rounded-xl"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+            style={{ background: isRunning ? 'var(--low-dim)' : 'var(--crit-dim)' }}>
+            <Bug size={20} style={{ color: isRunning ? 'var(--low)' : 'var(--crit)' }} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-mono font-bold" style={{ color: 'var(--tx-1)' }}>Honeypot Decoy System</h2>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold"
+                style={isRunning
+                  ? { background: 'var(--low-dim)', border: '1px solid var(--low-border)', color: 'var(--low)' }
+                  : { background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }
+                }>
+                {isRunning ? 'RUNNING' : 'STOPPED'}
+              </span>
+            </div>
+            <p className="text-[11px] font-mono mt-0.5" style={{ color: 'var(--tx-4)' }}>
+              Active Service: {activeListenersText}
+            </p>
+          </div>
         </div>
 
-        {/* Server Control Buttons */}
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          {status?.status === 'running' ? (
-            <button
-              onClick={() => handleToggleDecoyServer('stop')}
-              disabled={controlLoading}
-              style={{ ...styles.controlBtn, backgroundColor: '#da3633' }}
-            >
-              Stop Decoy Server
-            </button>
-          ) : (
-            <button
-              onClick={() => handleToggleDecoyServer('start')}
-              disabled={controlLoading}
-              style={{ ...styles.controlBtn, backgroundColor: '#238636' }}
-            >
-              Start Decoy Server
-            </button>
-          )}
-          <button onClick={fetchData} style={styles.refreshBtn}>
-            🔄 Refresh
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchHoneypotData}
+            disabled={loading}
+            className="p-2 rounded-lg transition-colors"
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-3)' }}
+            title="Refresh Telemetry"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button
+            onClick={() => setConfirmModal({ open: true, action: isRunning ? 'stop' : 'start' })}
+            disabled={actionLoading}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-[12px] font-mono font-semibold transition-all"
+            style={isRunning
+              ? { background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }
+              : { background: 'var(--low-dim)', border: '1px solid var(--low-border)', color: 'var(--low)' }
+            }
+          >
+            {actionLoading ? (
+              <RefreshCw size={14} className="animate-spin" />
+            ) : isRunning ? (
+              <>
+                <Square size={14} />
+                <span>Stop Honeypot</span>
+              </>
+            ) : (
+              <>
+                <Play size={14} />
+                <span>Start Honeypot</span>
+              </>
+            )}
           </button>
         </div>
       </div>
 
-      {actionMsg && <div style={styles.successBox}>{actionMsg}</div>}
-      {error && <div style={styles.errorBox}>{error}</div>}
-
-      {/* Metric Cards Grid */}
-      <div style={styles.cardsGrid}>
-        {/* Card 1: HONEYPOT STATUS */}
-        <div style={styles.card}>
-          <div style={styles.cardHeader}>
-            <span style={styles.cardTitle}>HONEYPOT STATUS</span>
-            <span style={styles.cardIcon}>🍯</span>
-          </div>
-          <div style={styles.cardMainValue}>
-            <span
-              style={{
-                ...styles.statusBadge,
-                backgroundColor: status?.status === 'running' ? '#16231a' : '#3d1419',
-                color: status?.status === 'running' ? '#56d364' : '#ff7b72',
-                borderColor: status?.status === 'running' ? '#1b4b27' : '#7d1a24',
-              }}
-            >
-              {status?.status === 'running' ? 'ACTIVE' : 'STOPPED'}
-            </span>
-          </div>
-          <div style={styles.cardSubtext}>
-            Host: <strong style={{ color: '#c9d1d9' }}>{status?.host || '127.0.0.1'}</strong> : <strong style={{ color: '#c9d1d9' }}>{status?.port || 8085}</strong> ({status?.service || 'http-decoy'})
-          </div>
-        </div>
-
-        {/* Card 2: INTERACTIONS */}
-        <div style={styles.card}>
-          <div style={styles.cardHeader}>
-            <span style={styles.cardTitle}>INTERACTIONS</span>
-            <span style={styles.cardIcon}>⚡</span>
-          </div>
-          <div style={styles.cardMainValue}>{totalInteractions}</div>
-          <div style={styles.cardSubtext}>
-            Session: <strong style={{ color: '#58a6ff' }}>{status?.total_interactions_session ?? 0}</strong> probes logged
+      {/* Confirmation Modal */}
+      {confirmModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+          <div className="p-6 rounded-xl max-w-sm w-full space-y-4" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-3">
+              <ShieldAlert size={24} style={{ color: confirmModal.action === 'stop' ? 'var(--crit)' : 'var(--low)' }} />
+              <h3 className="text-sm font-mono font-bold" style={{ color: 'var(--tx-1)' }}>
+                Confirm {confirmModal.action === 'stop' ? 'Stop' : 'Start'} Honeypot?
+              </h3>
+            </div>
+            <p className="text-[12px] font-mono" style={{ color: 'var(--tx-3)' }}>
+              Are you sure you want to {confirmModal.action === 'stop' ? 'stop the local HTTP decoy listener?' : 'start the local HTTP decoy listener on 127.0.0.1:8080?'}
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setConfirmModal({ open: false, action: 'start' })}
+                className="px-3 py-1.5 rounded-lg text-[11px] font-mono"
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--tx-4)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => executeHoneypotToggle(confirmModal.action)}
+                className="px-4 py-1.5 rounded-lg text-[11px] font-mono font-bold"
+                style={confirmModal.action === 'stop'
+                  ? { background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }
+                  : { background: 'var(--low-dim)', border: '1px solid var(--low-border)', color: 'var(--low)' }
+                }
+              >
+                Confirm {confirmModal.action === 'stop' ? 'Stop' : 'Start'}
+              </button>
+            </div>
           </div>
         </div>
+      )}
 
-        {/* Card 3: UNIQUE SOURCES */}
-        <div style={styles.card}>
-          <div style={styles.cardHeader}>
-            <span style={styles.cardTitle}>UNIQUE SOURCES</span>
-            <span style={styles.cardIcon}>🌐</span>
-          </div>
-          <div style={styles.cardMainValue}>{uniqueSourcesCount}</div>
-          <div style={styles.cardSubtext}>Distinct external intruder IPs</div>
-        </div>
-
-        {/* Card 4: HIGH-RISK SOURCES */}
-        <div style={styles.card}>
-          <div style={styles.cardHeader}>
-            <span style={styles.cardTitle}>HIGH-RISK SOURCES</span>
-            <span style={styles.cardIcon}>🚨</span>
-          </div>
-          <div style={{ ...styles.cardMainValue, color: '#ff7b72' }}>{highRiskSourcesCount}</div>
-          <div style={styles.cardSubtext}>Sources with Risk Score ≥ 70</div>
-        </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Honeypot Status"   value={isRunning ? 'ACTIVE' : 'STOPPED'} sub={isRunning ? 'Decoy traps armed' : 'Traps inactive'} accent={isRunning} />
+        <StatCard label="Total Events (DB)"  value={totalInteractions} sub="Logged decoy interactions" />
+        <StatCard label="Unique Attacking IPs" value={uniqueSources} sub="Top threat sources" />
+        <StatCard label="Correlated Alerts" value={correlatedAlertsCount} sub="Enriched security alerts" critical={correlatedAlertsCount > 0} />
       </div>
 
-      {loading ? (
-        <div style={styles.loadingBox}>Loading Honeypot Telemetry...</div>
-      ) : (
-        <>
-          {/* Targeted Services, Event Types & Severity Breakdown */}
-          <div style={styles.twoColLayout}>
-            {/* Targeted Services & Event Types */}
-            <div style={styles.panel}>
-              <h3 style={styles.panelTitle}>🎯 TARGETED SERVICES & EVENT CLASSIFICATION</h3>
-              
-              <div style={{ marginBottom: '16px' }}>
-                <div style={styles.sectionSubHeader}>Decoy Services List</div>
-                <div style={styles.tagsContainer}>
-                  <div style={styles.serviceTag}>
-                    <span>HTTP Decoy (Port {status?.port || 8085})</span>
-                    <strong style={{ color: '#58a6ff' }}>{totalInteractions} hits</strong>
-                  </div>
-                  <div style={styles.serviceTag}>
-                    <span>SSH Honeypot Decoy (Port 2222)</span>
-                    <strong style={{ color: '#8b949e' }}>Standby</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div style={styles.sectionSubHeader}>Event Type Breakdown</div>
-                <div style={styles.breakdownGrid}>
-                  {Object.entries(stats?.by_event_type || { SUSPICIOUS_REQUEST: totalInteractions }).map(
-                    ([type, count]) => (
-                      <div key={type} style={styles.breakdownCard}>
-                        <span style={styles.breakdownLabel}>{type}</span>
-                        <span style={styles.breakdownValue}>{count}</span>
-                      </div>
-                    )
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Severity Breakdown */}
-            <div style={styles.panel}>
-              <h3 style={styles.panelTitle}>🛡️ INCIDENT SEVERITY BREAKDOWN</h3>
-              <div style={styles.severityGrid}>
-                {['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((sev) => {
-                  const cnt = stats?.by_severity?.[sev] || stats?.by_severity?.[sev.toLowerCase()] || 0
-                  const styleBadge = getSeverityBadge(sev)
-                  return (
-                    <div
-                      key={sev}
-                      style={{
-                        ...styles.severityBox,
-                        backgroundColor: styleBadge.bg,
-                        borderColor: styleBadge.border,
-                      }}
-                    >
-                      <span style={{ color: styleBadge.text, fontWeight: 700, fontSize: '13px' }}>
-                        {sev} SEVERITY
-                      </span>
-                      <span style={{ color: styleBadge.text, fontWeight: 800, fontSize: '24px' }}>
-                        {cnt}
-                      </span>
+      {/* ── CHARTS / BREAKDOWNS ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel>
+          <SectionHeader title="Event Type Distribution" sub="Decoy probe classification" />
+          {stats?.by_event_type && Object.keys(stats.by_event_type).length > 0 ? (
+            <div className="space-y-3 mt-1">
+              {Object.entries(stats.by_event_type).map(([evt, count], i) => {
+                const maxCount = Math.max(...Object.values(stats.by_event_type || {}), 1)
+                const col = serviceColors[i % serviceColors.length]
+                return (
+                  <div key={evt}>
+                    <div className="flex justify-between text-[11px] font-mono mb-1">
+                      <span style={{ color: 'var(--tx-4)' }}>{evt}</span>
+                      <span style={{ color: col }}>{count} events</span>
                     </div>
-                  )
-                })}
-              </div>
+                    <div className="h-[3px] rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+                      <div className="h-full rounded-full"
+                        style={{ width: `${(count / maxCount) * 100}%`, background: col, boxShadow: `0 0 4px ${col}66` }} />
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-          </div>
-
-          {/* Top Suspicious Sources & Risk Scores Table */}
-          <div style={styles.panel}>
-            <h3 style={styles.panelTitle}>🔥 TOP SUSPICIOUS SOURCES & RISK SCORES</h3>
-            {stats?.top_attackers && stats.top_attackers.length > 0 ? (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>Source IP</th>
-                      <th style={styles.th}>Decoy Interactions</th>
-                      <th style={styles.th}>Risk Score</th>
-                      <th style={styles.th}>Risk Level</th>
-                      <th style={styles.th}>Attack Vectors</th>
-                      <th style={styles.th}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stats.top_attackers.map((att) => {
-                      const profile = attackerProfiles.find((p) => p.source_ip === att.ip)
-                      const rScore = profile?.risk_score ?? 75
-                      const rLevel = profile?.risk_level ?? (rScore >= 80 ? 'CRITICAL' : 'HIGH')
-                      const badge = getSeverityBadge(rLevel)
-                      const isSelected = selectedIp === att.ip
-
-                      return (
-                        <tr
-                          key={att.ip}
-                          style={{
-                            ...styles.tr,
-                            backgroundColor: isSelected ? '#1f2937' : 'transparent',
-                          }}
-                        >
-                          <td style={styles.td}>
-                            <span style={styles.ipText}>{att.ip}</span>
-                          </td>
-                          <td style={styles.td}>
-                            <strong style={{ color: '#d29922' }}>{att.count} probes</strong>
-                          </td>
-                          <td style={styles.td}>
-                            <strong style={{ color: badge.text }}>{rScore}/100</strong>
-                          </td>
-                          <td style={styles.td}>
-                            <span
-                              style={{
-                                ...styles.badge,
-                                backgroundColor: badge.bg,
-                                color: badge.text,
-                                borderColor: badge.border,
-                              }}
-                            >
-                              {rLevel}
-                            </span>
-                          </td>
-                          <td style={styles.td}>
-                            <span style={{ fontSize: '12px', color: '#8b949e' }}>
-                              {profile?.attack_types?.join(', ') || 'Decoy Probe & Scan'}
-                            </span>
-                          </td>
-                          <td style={styles.td}>
-                            <button
-                              onClick={() => setSelectedIp(att.ip)}
-                              style={{
-                                ...styles.inspectBtn,
-                                backgroundColor: isSelected ? '#238636' : '#21262d',
-                              }}
-                            >
-                              {isSelected ? 'Viewing Timeline' : 'Inspect Timeline'}
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div style={styles.emptyState}>No suspicious sources recorded yet.</div>
-            )}
-          </div>
-
-          {/* Attacker Behavior Timeline Section */}
-          {selectedIp && (
-            <div style={{ marginBottom: '24px' }}>
-              <AttackerBehaviorTimeline sourceIp={selectedIp} />
-            </div>
+          ) : (
+            <EmptyState message="No event classification telemetry recorded yet" />
           )}
+        </Panel>
 
-          {/* Recent Honeypot Events Log Table */}
-          <div style={styles.panel}>
-            <div style={styles.panelHeaderRow}>
-              <h3 style={styles.panelTitle}>📜 RECENT HONEYPOT DECOY EVENTS LOG</h3>
+        <Panel>
+          <SectionHeader title="Top Attacker IPs" sub="Sources interacting with traps" />
+          {stats?.top_attackers && stats.top_attackers.length > 0 ? (
+            <div className="space-y-3 mt-1">
+              {stats.top_attackers.slice(0, 5).map((att) => {
+                const targetIp = att.ip || (att as any).source_ip || ''
+                const isSelected = selectedIp === targetIp
+                const hits = att.count ?? (att as any).hits ?? 0
+                return (
+                  <div
+                    key={targetIp}
+                    onClick={() => setSelectedIp(targetIp)}
+                    className="flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors"
+                    style={{
+                      background: isSelected ? 'var(--accent-dim)' : 'var(--surface-2)',
+                      border: `1px solid ${isSelected ? 'var(--accent-border)' : 'var(--border)'}`,
+                    }}
+                  >
+                    <div>
+                      <IP>{targetIp || 'N/A'}</IP>
+                      <p className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--tx-5)' }}>
+                        {hits} interactions
+                      </p>
+                    </div>
+                    <span className="text-[11px] font-mono font-semibold" style={{ color: 'var(--accent)' }}>
+                      Inspect IP
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <EmptyState message="No attacker IP profiles recorded yet" />
+          )}
+        </Panel>
+      </div>
 
-              {/* Filters */}
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <input
-                  type="text"
-                  placeholder="Filter by IP / URI..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  style={styles.filterInput}
-                />
-                <select
-                  value={selectedEventType}
-                  onChange={(e) => setSelectedEventType(e.target.value)}
-                  style={styles.filterSelect}
-                >
-                  <option value="ALL">All Event Types</option>
-                  <option value="SUSPICIOUS_REQUEST">SUSPICIOUS_REQUEST</option>
-                  <option value="HTTP_PROBE">HTTP_PROBE</option>
-                  <option value="CONNECTION_ATTEMPT">CONNECTION_ATTEMPT</option>
-                </select>
-                <select
-                  value={selectedSeverity}
-                  onChange={(e) => setSelectedSeverity(e.target.value)}
-                  style={styles.filterSelect}
-                >
-                  <option value="ALL">All Severities</option>
-                  <option value="CRITICAL">CRITICAL</option>
-                  <option value="HIGH">HIGH</option>
-                  <option value="MEDIUM">MEDIUM</option>
-                  <option value="LOW">LOW</option>
-                </select>
+      {/* ── IP CORRELATION INSPECTOR (IF SELECTED) ── */}
+      {selectedIp && (
+        <Panel style={{ border: '1px solid var(--accent-border)' }}>
+          <SectionHeader title={`IP Correlation Inspector: ${selectedIp}`} sub="GET /honeypot/ip-correlation/{ip}">
+            <button
+              onClick={() => setSelectedIp(null)}
+              className="text-[11px] font-mono underline"
+              style={{ color: 'var(--tx-4)' }}
+            >
+              Close Inspector
+            </button>
+          </SectionHeader>
+
+          {ipLoading ? (
+            <LoadingState />
+          ) : ipCorrelation ? (
+            <div className="space-y-3 text-[12px] font-mono">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                <div>
+                  <span className="text-[10px] uppercase block" style={{ color: 'var(--tx-5)' }}>Total Alerts</span>
+                  <span className="font-bold text-amber-400">{ipCorrelation.total_alerts ?? 0}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase block" style={{ color: 'var(--tx-5)' }}>Honeypot Hits</span>
+                  <span className="font-bold text-cyan-400">{ipCorrelation.total_honeypot_hits ?? 0}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase block" style={{ color: 'var(--tx-5)' }}>Suspicion Score</span>
+                  <span className="font-bold text-red-400">{ipCorrelation.suspicion_score ?? 0} / 100</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase block" style={{ color: 'var(--tx-5)' }}>Suspicion Level</span>
+                  <span className="font-bold" style={{ color: ipCorrelation.suspicion_level === 'CRITICAL' ? 'var(--crit)' : 'var(--accent)' }}>
+                    {ipCorrelation.suspicion_level || 'LOW'}
+                  </span>
+                </div>
               </div>
             </div>
-
-            {filteredEvents.length > 0 ? (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>Timestamp</th>
-                      <th style={styles.th}>Source IP:Port</th>
-                      <th style={styles.th}>Decoy Target</th>
-                      <th style={styles.th}>Event Type</th>
-                      <th style={styles.th}>Severity</th>
-                      <th style={styles.th}>Request Payload / Line</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredEvents.map((ev) => {
-                      const badge = getSeverityBadge(ev.severity)
-                      return (
-                        <tr key={ev.id} style={styles.tr}>
-                          <td style={styles.td}>
-                            <span style={{ fontSize: '12px', color: '#8b949e', fontFamily: 'monospace' }}>
-                              {new Date(ev.timestamp).toLocaleString()}
-                            </span>
-                          </td>
-                          <td style={styles.td}>
-                            <span style={styles.ipText}>
-                              {ev.src_ip}:{ev.src_port}
-                            </span>
-                          </td>
-                          <td style={styles.td}>
-                            <span style={{ fontSize: '12px', color: '#c9d1d9' }}>
-                              {ev.service} ({ev.dst_ip}:{ev.dst_port})
-                            </span>
-                          </td>
-                          <td style={styles.td}>
-                            <span style={{ fontSize: '12px', fontWeight: 600, color: '#58a6ff' }}>
-                              {ev.event_type}
-                            </span>
-                          </td>
-                          <td style={styles.td}>
-                            <span
-                              style={{
-                                ...styles.badge,
-                                backgroundColor: badge.bg,
-                                color: badge.text,
-                                borderColor: badge.border,
-                              }}
-                            >
-                              {ev.severity.toUpperCase()}
-                            </span>
-                          </td>
-                          <td style={styles.td}>
-                            <code style={styles.codePayload}>{ev.request_type}</code>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div style={styles.emptyState}>No matching honeypot events found.</div>
-            )}
-          </div>
-
-          {/* Correlated NIDS Alerts Section */}
-          <div style={styles.panel}>
-            <h3 style={styles.panelTitle}>🔗 CORRELATED NIDS SECURITY ALERTS WITH HONEYPOT EVIDENCE</h3>
-            {correlatedAlerts.length > 0 ? (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>Timestamp</th>
-                      <th style={styles.th}>Source IP</th>
-                      <th style={styles.th}>Attack Type</th>
-                      <th style={styles.th}>Stage</th>
-                      <th style={styles.th}>Severity</th>
-                      <th style={styles.th}>Evidence Tags</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {correlatedAlerts.map((alt) => {
-                      const badge = getSeverityBadge(alt.severity)
-                      return (
-                        <tr key={alt.id} style={styles.tr}>
-                          <td style={styles.td}>
-                            <span style={{ fontSize: '12px', color: '#8b949e', fontFamily: 'monospace' }}>
-                              {new Date(alt.timestamp).toLocaleString()}
-                            </span>
-                          </td>
-                          <td style={styles.td}>
-                            <span style={styles.ipText}>{alt.src_ip}</span>
-                          </td>
-                          <td style={styles.td}>
-                            <span style={{ fontWeight: 600, color: '#f0f6fc' }}>{alt.attack_type}</span>
-                          </td>
-                          <td style={styles.td}>
-                            <span style={{ fontSize: '12px', color: '#8b949e' }}>Stage {alt.stage}</span>
-                          </td>
-                          <td style={styles.td}>
-                            <span
-                              style={{
-                                ...styles.badge,
-                                backgroundColor: badge.bg,
-                                color: badge.text,
-                                borderColor: badge.border,
-                              }}
-                            >
-                              {alt.severity.toUpperCase()}
-                            </span>
-                          </td>
-                          <td style={styles.td}>
-                            <span style={{ fontSize: '11px', color: '#d29922' }}>
-                              {alt.tags?.join(', ') || 'honeypot_activity'}
-                            </span>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div style={styles.emptyState}>No correlated NIDS alerts with honeypot activity recorded.</div>
-            )}
-          </div>
-        </>
+          ) : (
+            <EmptyState message={`No correlation timeline details found for ${selectedIp}`} />
+          )}
+        </Panel>
       )}
+
+      {/* ── RECENT HONEYPOT EVENTS TABLE ── */}
+      <Panel>
+        <SectionHeader title="Recent Honeypot Activity" sub="Live attacker interaction log (GET /honeypot/events)">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#10b981' }} />
+            <span className="text-[10px] font-mono font-semibold" style={{ color: '#10b981' }}>REAL TELEMETRY</span>
+          </div>
+        </SectionHeader>
+        {events.length > 0 ? (
+          <Table headers={['Time', 'Source IP', 'Target Port', 'Service', 'Request Line', 'Severity', 'Event Type']}>
+            {events.slice(0, 15).map((ev, i) => {
+              const sevUpper = SEVERITY_MAP[ev.severity || 'low'] ?? 'LOW'
+              return (
+                <Tr key={ev.id || i} onClick={() => setSelectedIp(ev.src_ip)}>
+                  <Td mono muted>{ev.timestamp ? ev.timestamp.replace('T', ' ').slice(11, 19) : 'N/A'}</Td>
+                  <Td><IP>{ev.src_ip || 'N/A'}</IP></Td>
+                  <Td mono>{ev.dst_port || ev.src_port || 8080}</Td>
+                  <Td muted>{ev.service || 'http-decoy'}</Td>
+                  <Td muted><code style={{ color: 'var(--accent)' }}>{ev.request_type || 'PROBE'}</code></Td>
+                  <Td><SeverityBadge severity={sevUpper} /></Td>
+                  <Td mono muted>{ev.event_type || 'SUSPICIOUS_REQUEST'}</Td>
+                </Tr>
+              )
+            })}
+          </Table>
+        ) : (
+          <EmptyState message="No honeypot events captured yet" />
+        )}
+      </Panel>
     </div>
   )
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    padding: '24px',
-    backgroundColor: '#090d16',
-    color: '#f0f6fc',
-    minHeight: '100vh',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '24px',
-    flexWrap: 'wrap',
-    gap: '16px',
-  },
-  title: {
-    fontSize: '24px',
-    fontWeight: 800,
-    margin: 0,
-    color: '#f0f6fc',
-    letterSpacing: '-0.5px',
-  },
-  subtitle: {
-    fontSize: '13px',
-    color: '#8b949e',
-    margin: '4px 0 0 0',
-  },
-  controlBtn: {
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '6px',
-    padding: '8px 16px',
-    fontWeight: 700,
-    fontSize: '13px',
-    cursor: 'pointer',
-    transition: 'opacity 0.2s',
-  },
-  refreshBtn: {
-    backgroundColor: '#21262d',
-    color: '#c9d1d9',
-    border: '1px solid #30363d',
-    borderRadius: '6px',
-    padding: '8px 14px',
-    fontSize: '13px',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  successBox: {
-    backgroundColor: '#16231a',
-    border: '1px solid #1b4b27',
-    color: '#56d364',
-    padding: '12px 16px',
-    borderRadius: '6px',
-    marginBottom: '20px',
-    fontSize: '13px',
-  },
-  errorBox: {
-    backgroundColor: '#3d1419',
-    border: '1px solid #7d1a24',
-    color: '#ff7b72',
-    padding: '12px 16px',
-    borderRadius: '6px',
-    marginBottom: '20px',
-    fontSize: '13px',
-  },
-  loadingBox: {
-    padding: '40px',
-    textAlign: 'center',
-    color: '#8b949e',
-    fontSize: '14px',
-  },
-  cardsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-    gap: '16px',
-    marginBottom: '24px',
-  },
-  card: {
-    backgroundColor: '#0d1117',
-    border: '1px solid #30363d',
-    borderRadius: '8px',
-    padding: '20px',
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'space-between',
-  },
-  cardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '12px',
-  },
-  cardTitle: {
-    fontSize: '12px',
-    fontWeight: 700,
-    color: '#8b949e',
-    letterSpacing: '0.5px',
-  },
-  cardIcon: {
-    fontSize: '16px',
-  },
-  cardMainValue: {
-    fontSize: '28px',
-    fontWeight: 800,
-    color: '#f0f6fc',
-    marginBottom: '8px',
-  },
-  statusBadge: {
-    padding: '4px 12px',
-    borderRadius: '12px',
-    fontSize: '13px',
-    fontWeight: 800,
-    border: '1px solid',
-    letterSpacing: '0.5px',
-  },
-  cardSubtext: {
-    fontSize: '12px',
-    color: '#8b949e',
-  },
-  twoColLayout: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
-    gap: '20px',
-    marginBottom: '24px',
-  },
-  panel: {
-    backgroundColor: '#0d1117',
-    border: '1px solid #30363d',
-    borderRadius: '8px',
-    padding: '20px',
-    marginBottom: '24px',
-  },
-  panelHeaderRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '16px',
-    flexWrap: 'wrap',
-    gap: '12px',
-  },
-  panelTitle: {
-    fontSize: '15px',
-    fontWeight: 700,
-    color: '#f0f6fc',
-    margin: '0 0 16px 0',
-  },
-  sectionSubHeader: {
-    fontSize: '12px',
-    fontWeight: 700,
-    color: '#8b949e',
-    marginBottom: '8px',
-    textTransform: 'uppercase',
-  },
-  tagsContainer: {
-    display: 'flex',
-    gap: '12px',
-    flexWrap: 'wrap',
-  },
-  serviceTag: {
-    backgroundColor: '#161b22',
-    border: '1px solid #30363d',
-    borderRadius: '6px',
-    padding: '10px 14px',
-    fontSize: '13px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '16px',
-    flex: 1,
-    minWidth: '200px',
-  },
-  breakdownGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-    gap: '10px',
-  },
-  breakdownCard: {
-    backgroundColor: '#161b22',
-    border: '1px solid #30363d',
-    borderRadius: '6px',
-    padding: '12px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  breakdownLabel: {
-    fontSize: '11px',
-    color: '#8b949e',
-    fontWeight: 600,
-  },
-  breakdownValue: {
-    fontSize: '18px',
-    fontWeight: 800,
-    color: '#58a6ff',
-  },
-  severityGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '12px',
-  },
-  severityBox: {
-    border: '1px solid',
-    borderRadius: '6px',
-    padding: '16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: '13px',
-  },
-  th: {
-    textAlign: 'left',
-    padding: '10px 12px',
-    borderBottom: '1px solid #30363d',
-    color: '#8b949e',
-    fontSize: '12px',
-    fontWeight: 600,
-  },
-  tr: {
-    borderBottom: '1px solid #21262d',
-    transition: 'background-color 0.15s ease',
-  },
-  td: {
-    padding: '12px',
-    verticalAlign: 'middle',
-  },
-  ipText: {
-    fontFamily: 'monospace',
-    fontWeight: 700,
-    color: '#58a6ff',
-  },
-  badge: {
-    fontSize: '11px',
-    fontWeight: 700,
-    padding: '3px 8px',
-    borderRadius: '10px',
-    border: '1px solid',
-  },
-  inspectBtn: {
-    color: '#f0f6fc',
-    border: '1px solid #30363d',
-    borderRadius: '6px',
-    padding: '6px 12px',
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: '24px',
-    color: '#8b949e',
-    fontSize: '13px',
-  },
-  filterInput: {
-    backgroundColor: '#161b22',
-    border: '1px solid #30363d',
-    borderRadius: '6px',
-    color: '#f0f6fc',
-    padding: '6px 12px',
-    fontSize: '12px',
-  },
-  filterSelect: {
-    backgroundColor: '#161b22',
-    border: '1px solid #30363d',
-    borderRadius: '6px',
-    color: '#f0f6fc',
-    padding: '6px 12px',
-    fontSize: '12px',
-  },
-  codePayload: {
-    backgroundColor: '#161b22',
-    border: '1px solid #30363d',
-    borderRadius: '4px',
-    padding: '4px 8px',
-    fontSize: '12px',
-    color: '#ffa657',
-    fontFamily: 'monospace',
-    wordBreak: 'break-all',
-  },
-}
+export { HoneypotPage }

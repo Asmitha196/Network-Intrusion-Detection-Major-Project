@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from db.session import AsyncSessionLocal
 from db.models import Alert, FlowRecord
+from ingestion.capture import LiveCaptureEngine
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
@@ -173,12 +174,16 @@ async def ws_traffic(websocket: WebSocket) -> None:
                     res_alerts = await session.execute(select(func.count()).select_from(Alert).where(Alert.deleted == False))
                     total_alerts = res_alerts.scalar_one()
 
+                # Get live capture engine telemetry status
+                engine_status = LiveCaptureEngine().get_status()
+
                 stats = {
                     "type": "traffic_stats",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "total_flows_processed": total_flows,
                     "total_alerts_generated": total_alerts,
                     "status": "active",
+                    **engine_status,
                 }
                 await websocket.send_json(stats)
             except Exception as e:

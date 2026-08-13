@@ -12,9 +12,16 @@ export default function MetricsPage() {
   useEffect(() => {
     async function fetchData() {
       try {
+        const now = new Date()
+        let hoursAgo = 24
+        if (interval === '1h') hoursAgo = 24 * 7
+        if (interval === '1d') hoursAgo = 24 * 30
+
+        const startTs = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000).toISOString()
+
         const [overviewRes, timelineRes] = await Promise.all([
           apiClient.get<MetricsOverview>('/metrics/overview'),
-          apiClient.get<TimelineResponse>(`/metrics/timeline?interval=${interval}`),
+          apiClient.get<TimelineResponse>(`/metrics/timeline?start_ts=${encodeURIComponent(startTs)}&interval=${interval}`),
         ])
         setOverview(overviewRes.data)
         setTimeline(timelineRes.data.timeline || [])

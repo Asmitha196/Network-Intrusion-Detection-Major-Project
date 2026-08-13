@@ -68,7 +68,7 @@ export const SecurityIntelligencePanel: React.FC<SecurityIntelligencePanelProps>
     const msg = lastMessage as any
     if (msg.type === 'honeypot_event' && msg.event) {
       setHoneypotEvents((prev) => [msg.event, ...prev.filter((e) => e.id !== msg.event.id)].slice(0, 5))
-      setHoneypotStatus((prev) =>
+      setHoneypotStatus((prev: any) =>
         prev
           ? {
               ...prev,

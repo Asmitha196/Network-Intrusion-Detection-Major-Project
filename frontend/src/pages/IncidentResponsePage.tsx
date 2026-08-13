@@ -1,255 +1,384 @@
-import React, { useState, useEffect } from 'react'
-import axios from 'axios'
+import { useState, useEffect, useCallback } from 'react'
+import { AlertTriangle, RefreshCw, Lock } from 'lucide-react'
 import apiClient from '../api/client'
-import type { AuditLog, IncidentRules, ResponseRecommendation } from '../types'
+import { StatCard, SectionHeader, Panel, IP, Table, Tr, Td, EmptyState, LoadingState, Modal } from '../components/ui'
+
+interface Recommendation {
+  id: string
+  source_ip: string
+  recommended_action: string
+  reason: string
+  risk_score: number
+  risk_level: string
+  related_evidence: {
+    total_alerts: number
+    port_scan_count: number
+    brute_force_count: number
+    honeypot_interactions: number
+    critical_alerts: number
+    attack_types: string[]
+  }
+  suggested_command: string
+  requires_analyst_approval: boolean
+}
+
+interface AuditLogItem {
+  id: string
+  timestamp: string
+  username: string
+  action: string
+  target: string
+  details: Record<string, any>
+}
+
+interface ActiveRules {
+  firewall_rules: Array<{
+    rule_id: string
+    ip_address: string
+    os_command: string
+    reason: string
+    created_at: string
+    created_by: string
+    status: string
+  }>
+  whitelist: string[]
+  blacklist: string[]
+}
+
+function RiskBadge({ score }: { score: number }) {
+  const isHigh = score >= 75
+  const isMed = score >= 40 && score < 75
+  const col = isHigh ? 'var(--crit)' : isMed ? 'var(--high)' : 'var(--low)'
+  const bg = isHigh ? 'var(--crit-dim)' : isMed ? 'var(--high-dim)' : 'var(--low-dim)'
+  const border = isHigh ? 'var(--crit-border)' : isMed ? 'var(--high-border)' : 'var(--low-border)'
+
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-bold"
+      style={{ background: bg, border: `1px solid ${border}`, color: col }}>
+      Risk {score}
+    </span>
+  )
+}
 
 export default function IncidentResponsePage() {
-  const [blockIpInput, setBlockIpInput] = useState<string>('')
-  const [reasonInput, setReasonInput] = useState<string>('')
-  const [confirmed, setConfirmed] = useState<boolean>(false)
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
-  const [rules, setRules] = useState<IncidentRules>({ firewall_rules: [], whitelist: [], blacklist: [] })
-  const [recommendations, setRecommendations] = useState<ResponseRecommendation[]>([])
-  const [msg, setMsg] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([])
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([])
+  const [activeRules, setActiveRules] = useState<ActiveRules | null>(null)
+  const [loading, setLoading] = useState<boolean>(true)
 
-  const fetchRulesAndLogs = async () => {
+  // Block Modal state
+  const [blockModalOpen, setBlockModalOpen] = useState<boolean>(false)
+  const [targetIp, setTargetIp] = useState<string>('')
+  const [blockReason, setBlockReason] = useState<string>('')
+  const [isConfirmed, setIsConfirmed] = useState<boolean>(false)
+  const [blockActionLoading, setBlockActionLoading] = useState<boolean>(false)
+
+  // Whitelist / Blacklist action state
+  const [actionLoadingIp, setActionLoadingIp] = useState<string | null>(null)
+
+  // Load recommendations, active rules, and audit logs
+  const fetchData = useCallback(async () => {
     try {
-      const [logsRes, rulesRes, recRes] = await Promise.all([
-        apiClient.get<AuditLog[]>('/incident/audit-logs'),
-        apiClient.get<IncidentRules>('/incident/rules'),
-        apiClient.get<ResponseRecommendation[]>('/incident/recommendations'),
+      setLoading(true)
+      const [recsRes, rulesRes, auditRes] = await Promise.allSettled([
+        apiClient.get<Recommendation[]>('/incident/recommendations'),
+        apiClient.get<ActiveRules>('/incident/rules'),
+        apiClient.get<AuditLogItem[]>('/incident/audit-logs'),
       ])
-      setAuditLogs(logsRes.data || [])
-      setRules(rulesRes.data || { firewall_rules: [], whitelist: [], blacklist: [] })
-      setRecommendations(recRes.data || [])
-    } catch (e) {
-      console.warn('Failed to fetch incident data:', e)
-    }
-  }
 
-  useEffect(() => {
-    fetchRulesAndLogs()
+      if (recsRes.status === 'fulfilled') setRecommendations(Array.isArray(recsRes.value.data) ? recsRes.value.data : [])
+      if (rulesRes.status === 'fulfilled') setActiveRules(rulesRes.value.data)
+      if (auditRes.status === 'fulfilled') setAuditLogs(Array.isArray(auditRes.value.data) ? auditRes.value.data : [])
+    } catch (err) {
+      console.error('Failed to load incident response telemetry:', err)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  const handleApplyRecommendation = (rec: ResponseRecommendation) => {
-    setBlockIpInput(rec.source_ip)
-    setReasonInput(`[Recommended Action] ${rec.recommended_action} - ${rec.reason}`)
-    setConfirmed(true)
-    setMsg(`Recommendation for ${rec.source_ip} pre-filled below. Click 'Apply OS Firewall Block Rule' after final analyst review.`)
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  // Open Block Confirmation Modal
+  const openBlockModal = (rec: Recommendation) => {
+    setTargetIp(rec.source_ip)
+    setBlockReason(rec.reason || `Analyst block rule for IP ${rec.source_ip}`)
+    setIsConfirmed(false)
+    setBlockModalOpen(true)
   }
 
-  const handleBlockIp = async () => {
-    if (!blockIpInput || !reasonInput || !confirmed) {
-      setError('Please provide IP, reason, and check explicit analyst confirmation.')
+  // Execute Block IP API call (POST /incident/block-ip)
+  const handleBlockConfirm = async () => {
+    if (!isConfirmed) {
+      alert('You must check the confirmation checkbox to explicitly authorize firewall blocking.')
       return
     }
-    setError(null)
-    setMsg(null)
+
     try {
-      const res = await apiClient.post<{ message: string }>('/incident/block-ip', {
-        ip_address: blockIpInput.trim(),
-        reason: reasonInput.trim(),
+      setBlockActionLoading(true)
+      await apiClient.post('/incident/block-ip', {
+        ip_address: targetIp,
+        reason: blockReason,
         confirmed: true,
       })
-      setMsg(res.data.message)
-      setBlockIpInput('')
-      setReasonInput('')
-      setConfirmed(false)
-      fetchRulesAndLogs()
-    } catch (e) {
-      if (axios.isAxiosError(e) && e.response?.data?.detail) {
-        setError(String(e.response.data.detail))
-      } else {
-        setError('Failed to block IP')
-      }
+
+      alert(`Successfully added OS Firewall Block rule for ${targetIp}`)
+      setBlockModalOpen(false)
+      fetchData()
+    } catch (err: any) {
+      console.error(`Failed to block IP ${targetIp}:`, err)
+      alert(`Firewall block failed: ${err.response?.data?.detail || err.message}`)
+    } finally {
+      setBlockActionLoading(false)
+    }
+  }
+
+  // Whitelist IP (POST /incident/whitelist-ip)
+  const handleWhitelist = async (ip: string) => {
+    try {
+      setActionLoadingIp(ip)
+      await apiClient.post('/incident/whitelist-ip', {
+        ip_address: ip,
+        notes: 'Added via SOC Incident Response dashboard',
+      })
+      fetchData()
+    } catch (err: any) {
+      console.error(`Failed to whitelist IP ${ip}:`, err)
+      alert(`Whitelist failed: ${err.response?.data?.detail || err.message}`)
+    } finally {
+      setActionLoadingIp(null)
+    }
+  }
+
+  // Blacklist IP (POST /incident/blacklist-ip)
+  const handleBlacklist = async (ip: string) => {
+    try {
+      setActionLoadingIp(ip)
+      await apiClient.post('/incident/blacklist-ip', {
+        ip_address: ip,
+        notes: 'Added via SOC Incident Response dashboard',
+      })
+      fetchData()
+    } catch (err: any) {
+      console.error(`Failed to blacklist IP ${ip}:`, err)
+      alert(`Blacklist failed: ${err.response?.data?.detail || err.message}`)
+    } finally {
+      setActionLoadingIp(null)
     }
   }
 
   return (
-    <div style={styles.container}>
-      <div>
-        <h2 style={styles.pageTitle}>Automated Incident Response & Firewall Module</h2>
-        <span style={styles.pageSubtitle}>
-          Apply OS Firewall rules (Windows netsh / Linux iptables), manage Whitelist/Blacklist, and track analyst action audit trails
-        </span>
+    <div className="space-y-4 select-none">
+
+      {/* ── STAT CARDS ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Pending Recommendations" value={recommendations.length} sub="Requires analyst review" critical={recommendations.length > 0} />
+        <StatCard label="Active Firewall Rules"   value={activeRules?.firewall_rules?.length ?? 0} sub="OS netsh/iptables blocks" accent />
+        <StatCard label="Whitelisted IPs"          value={activeRules?.whitelist?.length ?? 0} sub="Trusted LAN & loopback" />
+        <StatCard label="Blacklisted IPs"          value={activeRules?.blacklist?.length ?? 0} sub="Denied threat actors" critical={(activeRules?.blacklist?.length ?? 0) > 0} />
       </div>
 
-      {msg && <div style={styles.successBox}>{msg}</div>}
-      {error && <div style={styles.errorBox}>{error}</div>}
-
-      {/* Recommended Actions Panel */}
-      <div style={{ backgroundColor: '#0d1117', border: '1px solid #30363d', borderRadius: '8px', padding: '20px' }}>
-        <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#f0f6fc', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          🛡️ SYSTEM RECOMMENDED ACTIONS (ANALYST APPROVAL MANDATORY)
-        </h3>
-
-        {recommendations.length === 0 ? (
-          <div style={{ color: '#8b949e', fontSize: '13px', textAlign: 'center', padding: '16px' }}>
-            No active containment recommendations. System status nominal.
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {recommendations.slice(0, 5).map((rec) => (
-              <div key={rec.id} style={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-                <div style={{ flex: 1, minWidth: '280px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                    <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '15px', color: '#58a6ff' }}>{rec.source_ip}</span>
-                    <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', backgroundColor: rec.risk_score >= 80 ? '#3d1419' : '#362112', color: rec.risk_score >= 80 ? '#ff7b72' : '#ffa657', border: '1px solid' }}>
-                      RISK {rec.risk_score}/100 ({rec.risk_level})
-                    </span>
-                  </div>
-
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#f0f6fc', marginBottom: '4px' }}>
-                    RECOMMENDED ACTION: <span style={{ color: '#ffa657' }}>{rec.recommended_action}</span>
-                  </div>
-
-                  <div style={{ fontSize: '12px', color: '#8b949e', marginBottom: '8px' }}>
-                    <strong>Reason:</strong> {rec.reason}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '12px', fontSize: '11px', color: '#8b949e' }}>
-                    <span>Alerts: <strong style={{ color: '#c9d1d9' }}>{rec.related_evidence.total_alerts}</strong></span>
-                    <span>Decoy Hits: <strong style={{ color: '#d29922' }}>{rec.related_evidence.honeypot_interactions}</strong></span>
-                    <span>Attack Vectors: <strong style={{ color: '#58a6ff' }}>{rec.related_evidence.attack_types.join(', ') || 'Anomaly'}</strong></span>
-                  </div>
-                </div>
-
-                <div>
-                  <button
-                    onClick={() => handleApplyRecommendation(rec)}
-                    style={{ backgroundColor: '#238636', color: '#ffffff', border: 'none', borderRadius: '6px', padding: '8px 16px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
-                  >
-                    Approve & Pre-fill Block Form
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div style={styles.twoCol}>
-        {/* Block IP Form */}
-        <div style={styles.card}>
-          <h3 style={styles.cardTitle}>Firewall IP Block Command Generator</h3>
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Target IP Address:</label>
-            <input
-              type="text"
-              style={styles.input}
-              placeholder="e.g. 185.220.101.5"
-              value={blockIpInput}
-              onChange={(e) => setBlockIpInput(e.target.value)}
-            />
-          </div>
-
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Justification / Reason:</label>
-            <input
-              type="text"
-              style={styles.input}
-              placeholder="e.g. Repeated SSH Brute Force Attack detected by Stage 1 ML"
-              value={reasonInput}
-              onChange={(e) => setReasonInput(e.target.value)}
-            />
-          </div>
-
-          <div style={styles.checkboxWrapper}>
-            <input
-              type="checkbox"
-              id="confirmCheck"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
-            />
-            <label htmlFor="confirmCheck" style={styles.checkLabel}>
-              I confirm this firewall blocking action and assume responsibility.
-            </label>
-          </div>
-
-          <button style={styles.blockButton} onClick={handleBlockIp}>
-            Apply OS Firewall Block Rule
+      {/* ── RECOMMENDATIONS TABLE ── */}
+      <Panel>
+        <SectionHeader title="Contextual Response Recommendations" sub="Non-automated containment guidance requiring explicit analyst approval">
+          <button
+            onClick={fetchData}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-mono transition-colors"
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-3)' }}
+          >
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+            <span>Refresh</span>
           </button>
-        </div>
+        </SectionHeader>
 
-        {/* Active Lists */}
-        <div style={styles.card}>
-          <h3 style={styles.cardTitle}>Active Security Lists & Rules</h3>
-          <div style={styles.listSection}>
-            <span style={styles.listTitle}>Blacklisted Threat IPs ({rules.blacklist?.length || 0}):</span>
-            <div style={styles.tagGroup}>
-              {rules.blacklist?.map((ip: string) => (
-                <span key={ip} style={styles.blackTag}>
-                  🛑 {ip} <span style={{ color: '#ff7b72', fontSize: '11px', marginLeft: '4px', fontWeight: 700 }}>(Risk: 85/100)</span>
-                </span>
+        {loading && recommendations.length === 0 ? (
+          <LoadingState />
+        ) : recommendations.length > 0 ? (
+          <Table headers={['Target IP', 'Risk Score', 'Recommended Action', 'Reason / Evidence', 'Evidence Breakdown', 'Analyst Actions']}>
+            {recommendations.map(rec => {
+              const ev = rec.related_evidence
+              const isActioning = actionLoadingIp === rec.source_ip
+              return (
+                <Tr key={rec.id}>
+                  <Td><IP>{rec.source_ip}</IP></Td>
+                  <Td><RiskBadge score={rec.risk_score} /></Td>
+                  <Td font-bold>{rec.recommended_action}</Td>
+                  <Td muted>{rec.reason}</Td>
+                  <Td mono muted>
+                    Alerts: {ev?.total_alerts ?? 0} | Crit: {ev?.critical_alerts ?? 0} | Decoy: {ev?.honeypot_interactions ?? 0}
+                  </Td>
+                  <Td>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => openBlockModal(rec)}
+                        disabled={isActioning}
+                        className="px-2.5 py-1 rounded text-[11px] font-mono font-semibold transition-all"
+                        style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }}
+                      >
+                        Block IP
+                      </button>
+                      <button
+                        onClick={() => handleWhitelist(rec.source_ip)}
+                        disabled={isActioning}
+                        className="px-2.5 py-1 rounded text-[11px] font-mono transition-all"
+                        style={{ background: 'var(--low-dim)', border: '1px solid var(--low-border)', color: 'var(--low)' }}
+                      >
+                        Whitelist
+                      </button>
+                      <button
+                        onClick={() => handleBlacklist(rec.source_ip)}
+                        disabled={isActioning}
+                        className="px-2.5 py-1 rounded text-[11px] font-mono transition-all"
+                        style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-3)' }}
+                      >
+                        Blacklist
+                      </button>
+                    </div>
+                  </Td>
+                </Tr>
+              )
+            })}
+          </Table>
+        ) : (
+          <EmptyState message="No pending response recommendations requiring analyst containment" />
+        )}
+      </Panel>
+
+      {/* ── ACTIVE RULES & LISTS ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel>
+          <SectionHeader title="Active OS Firewall Rules" sub="Enforced netsh advfirewall & iptables blocks" />
+          {activeRules?.firewall_rules && activeRules.firewall_rules.length > 0 ? (
+            <div className="space-y-2 text-[11px] font-mono">
+              {activeRules.firewall_rules.map(rule => (
+                <div key={rule.rule_id} className="p-3 rounded-lg flex items-center justify-between"
+                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <IP>{rule.ip_address}</IP>
+                      <span className="text-[10px] px-2 py-0.5 rounded font-semibold"
+                        style={{ background: 'var(--crit-dim)', color: 'var(--crit)' }}>
+                        {rule.status}
+                      </span>
+                    </div>
+                    <p className="text-[10px] mt-1" style={{ color: 'var(--tx-4)' }}>{rule.reason}</p>
+                    <code className="text-[10px] text-cyan-400 block mt-0.5">{rule.os_command}</code>
+                  </div>
+                </div>
               ))}
             </div>
+          ) : (
+            <EmptyState message="No active OS firewall block rules applied" />
+          )}
+        </Panel>
 
-            <span style={{ ...styles.listTitle, marginTop: '12px' }}>Whitelisted IPs ({rules.whitelist?.length || 0}):</span>
-            <div style={styles.tagGroup}>
-              {rules.whitelist?.map((ip: string) => (
-                <span key={ip} style={styles.whiteTag}>{ip}</span>
+        <Panel>
+          <SectionHeader title="SOC Audit Trail History" sub="Complete log of analyst containment actions" />
+          {auditLogs.length > 0 ? (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1 text-[11px] font-mono">
+              {auditLogs.slice(0, 15).map(log => (
+                <div key={log.id} className="p-2.5 rounded-lg flex items-center justify-between"
+                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold" style={{ color: 'var(--accent)' }}>{log.action}</span>
+                      <span style={{ color: 'var(--tx-2)' }}>Target: {log.target}</span>
+                    </div>
+                    <span className="text-[10px]" style={{ color: 'var(--tx-5)' }}>By analyst: {log.username}</span>
+                  </div>
+                  <span style={{ color: 'var(--tx-5)' }}>{log.timestamp ? log.timestamp.replace('T', ' ').slice(0, 19) : ''}</span>
+                </div>
               ))}
+            </div>
+          ) : (
+            <EmptyState message="No audit trail events recorded" />
+          )}
+        </Panel>
+      </div>
+
+      {/* ── EXPLICIT ANALYST BLOCK CONFIRMATION MODAL ── */}
+      {blockModalOpen && (
+        <Modal title={`Authorize OS Firewall Block: ${targetIp}`} onClose={() => setBlockModalOpen(false)}>
+          <div className="space-y-4 text-[12px] font-mono">
+            <div className="p-3 rounded-lg flex items-start gap-2.5"
+              style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)' }}>
+              <AlertTriangle size={18} style={{ color: 'var(--crit)', flexShrink: 0 }} />
+              <div>
+                <p className="font-bold" style={{ color: 'var(--crit)' }}>Explicit Analyst Confirmation Required</p>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--tx-2)' }}>
+                  NIDS requires explicit human analyst approval before executing firewall containment rules.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: 'var(--tx-5)' }}>
+                Target IP Address
+              </label>
+              <input
+                type="text"
+                disabled
+                value={targetIp}
+                className="w-full p-2.5 rounded-lg text-[13px] outline-none"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--accent)' }}
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: 'var(--tx-5)' }}>
+                Justification / Reason
+              </label>
+              <textarea
+                rows={2}
+                value={blockReason}
+                onChange={e => setBlockReason(e.target.value)}
+                className="w-full p-2.5 rounded-lg text-[12px] outline-none resize-none"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-1)' }}
+              />
+            </div>
+
+            <div className="flex items-center gap-2.5 p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+              <input
+                type="checkbox"
+                id="explicitConfirm"
+                checked={isConfirmed}
+                onChange={e => setIsConfirmed(e.target.checked)}
+                className="w-4 h-4"
+                style={{ accentColor: 'var(--crit)' }}
+              />
+              <label htmlFor="explicitConfirm" className="cursor-pointer text-[11px] font-semibold" style={{ color: 'var(--tx-1)' }}>
+                I explicitly confirm OS firewall blocking of IP address {targetIp}
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setBlockModalOpen(false)}
+                className="px-4 py-2 rounded-lg text-[12px]"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-3)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBlockConfirm}
+                disabled={!isConfirmed || blockActionLoading}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-semibold disabled:opacity-40"
+                style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }}
+              >
+                {blockActionLoading ? (
+                  <RefreshCw size={14} className="animate-spin" />
+                ) : (
+                  <>
+                    <Lock size={14} />
+                    <span>Apply Firewall Block</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Audit Log Table */}
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>SOC Analyst Action Audit Trail</h3>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>Timestamp</th>
-              <th style={styles.th}>Analyst</th>
-              <th style={styles.th}>Action</th>
-              <th style={styles.th}>Target</th>
-              <th style={styles.th}>Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {auditLogs.map((log) => (
-              <tr key={log.id}>
-                <td style={styles.tdTs}>{new Date(log.timestamp).toLocaleString()}</td>
-                <td style={styles.tdUser}>{log.username}</td>
-                <td style={styles.tdAction}>{log.action}</td>
-                <td style={styles.tdTarget}>{log.target}</td>
-                <td style={styles.tdDetails}>{JSON.stringify(log.details)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+        </Modal>
+      )}
     </div>
   )
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  container: { padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' },
-  pageTitle: { fontSize: '20px', fontWeight: 700, color: '#f0f6fc', margin: 0 },
-  pageSubtitle: { fontSize: '12px', color: '#8b949e' },
-  twoCol: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' },
-  card: { backgroundColor: '#0d1117', border: '1px solid #21262d', borderRadius: '8px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' },
-  cardTitle: { fontSize: '15px', fontWeight: 700, color: '#f0f6fc', margin: 0 },
-  formGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  label: { fontSize: '12px', color: '#8b949e', fontWeight: 600 },
-  input: { backgroundColor: '#161b22', color: '#f0f6fc', border: '1px solid #30363d', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', outline: 'none' },
-  checkboxWrapper: { display: 'flex', alignItems: 'center', gap: '8px' },
-  checkLabel: { fontSize: '12px', color: '#c9d1d9' },
-  blockButton: { backgroundColor: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', padding: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' },
-  successBox: { backgroundColor: '#064e3b33', border: '1px solid #10b981', color: '#6ee7b7', padding: '10px 14px', borderRadius: '6px', fontSize: '13px' },
-  errorBox: { backgroundColor: '#7f1d1d33', border: '1px solid #ef4444', color: '#fca5a5', padding: '10px 14px', borderRadius: '6px', fontSize: '13px' },
-  listSection: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  listTitle: { fontSize: '12px', fontWeight: 700, color: '#8b949e' },
-  tagGroup: { display: 'flex', flexWrap: 'wrap', gap: '6px' },
-  blackTag: { backgroundColor: '#7f1d1d', color: '#fca5a5', fontSize: '11px', fontWeight: 700, padding: '4px 8px', borderRadius: '4px', fontFamily: 'monospace' },
-  whiteTag: { backgroundColor: '#065f46', color: '#a7f3d0', fontSize: '11px', fontWeight: 700, padding: '4px 8px', borderRadius: '4px', fontFamily: 'monospace' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: '12px' },
-  th: { textAlign: 'left', padding: '8px', borderBottom: '1px solid #30363d', color: '#8b949e', fontSize: '11px', textTransform: 'uppercase' },
-  tdTs: { padding: '8px', color: '#8b949e' },
-  tdUser: { padding: '8px', color: '#f0f6fc', fontWeight: 600 },
-  tdAction: { padding: '8px', color: '#3b82f6', fontWeight: 700 },
-  tdTarget: { padding: '8px', fontFamily: 'monospace', color: '#f0f6fc' },
-  tdDetails: { padding: '8px', color: '#6e7681', fontFamily: 'monospace', fontSize: '11px' },
 }

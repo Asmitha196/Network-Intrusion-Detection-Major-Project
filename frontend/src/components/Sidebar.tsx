@@ -8,9 +8,6 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ wsReadyState = 'connecting' }) => {
   const navItems = [
     { label: 'SOC Dashboard', path: '/', icon: '📊' },
-    { label: 'Correlated Incidents', path: '/correlated-incidents', icon: '🔗' },
-    { label: 'Attacker Profiles', path: '/attackers', icon: '🎯' },
-    { label: 'Honeypot Decoy', path: '/honeypot', icon: '🍯' },
     { label: 'Threat Intel', path: '/threat-intel', icon: '🔍' },
     { label: 'Incident Response', path: '/incident', icon: '🛡️' },
     { label: 'Simulation Lab', path: '/simulation', icon: '🧪' },

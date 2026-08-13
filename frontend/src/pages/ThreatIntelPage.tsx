@@ -1,185 +1,209 @@
-import React, { useState } from 'react'
-import axios from 'axios'
+import { useState } from 'react'
+import { Search, AlertTriangle, CheckCircle } from 'lucide-react'
 import apiClient from '../api/client'
+import { Panel, SectionHeader } from '../components/ui'
 import type { ThreatIntelData } from '../types'
 
-function isValidIpAddress(rawIp: string): boolean {
-  const ip = rawIp.trim()
-  if (!ip) return false
+const SAMPLE_IPS = ['185.220.101.5', '8.8.8.8', '1.1.1.1', '192.168.1.1']
 
-  // IPv4 regex (4 octets 0-255)
-  const ipv4Pattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
-  if (ipv4Pattern.test(ip)) return true
+function isValidIP(ip: string): boolean {
+  const clean = ip.trim()
+  if (!clean) return false
 
-  // IPv6 regex
-  const ipv6Pattern = /^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^(?:[0-9a-fA-F]{1,4}:){1,7}:|^:(?::[0-9a-fA-F]{1,4}){1,7}$|^(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}$|^(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}$|^(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}$|^(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}$|^(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}$|^[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}$|^::$/
-  return ipv6Pattern.test(ip)
+  // Validate IPv4
+  const v4Parts = clean.split('.')
+  if (v4Parts.length === 4) {
+    return v4Parts.every(part => {
+      if (!/^\d+$/.test(part)) return false
+      const num = Number(part)
+      return num >= 0 && num <= 255
+    })
+  }
+
+  // Validate IPv6
+  const v6Regex = /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^(([0-9a-fA-F]{1,4}:){1,7}:|:((:[0-9a-fA-F]{1,4}){1,7}|:))$|^::1$/
+  return v6Regex.test(clean)
+}
+
+function Bar({ value, color }: { value: number; color: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+        <div className="h-full rounded-full" style={{ width: `${Math.min(Math.max(value, 0), 100)}%`, background: color, boxShadow: `0 0 4px ${color}66` }} />
+      </div>
+      <span className="text-[11px] font-mono w-8 text-right" style={{ color }}>{value}</span>
+    </div>
+  )
 }
 
 export default function ThreatIntelPage() {
-  const [ipInput, setIpInput] = useState<string>('185.220.101.5')
-  const [intel, setIntel] = useState<ThreatIntelData | null>(null)
+  const [query, setQuery] = useState<string>('185.220.101.5')
+  const [error, setError] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
-  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<ThreatIntelData | null>(null)
 
-  const handleLookup = async (ipToSearch?: string) => {
-    const rawTarget = ipToSearch !== undefined ? ipToSearch : ipInput
-    const target = rawTarget.trim()
+  const lookup = async (ipToSearch: string) => {
+    const cleanIp = ipToSearch.trim()
 
-    if (!isValidIpAddress(target)) {
+    if (!isValidIP(cleanIp)) {
       setError('Invalid IP address. Please enter a valid IPv4 or IPv6 address.')
-      setIntel(null)
+      setResult(null)
       return
     }
 
+    setError('')
     setLoading(true)
-    setError(null)
+    setResult(null)
+
     try {
-      const res = await apiClient.get<ThreatIntelData>(`/threat-intel/lookup/${target}`)
-      setIntel(res.data)
-    } catch (e) {
-      if (axios.isAxiosError(e) && e.response?.data?.detail) {
-        setError(String(e.response.data.detail))
+      // Calling exact endpoint GET /threat-intel/lookup/{ip_address}
+      const res = await apiClient.get<ThreatIntelData>(`/threat-intel/lookup/${encodeURIComponent(cleanIp)}`)
+      setResult(res.data)
+    } catch (err: any) {
+      console.error(`Failed to lookup IP ${cleanIp}:`, err)
+      const detail = err.response?.data?.detail
+      if (detail) {
+        setError(typeof detail === 'string' ? detail : JSON.stringify(detail))
       } else {
-        setError('Failed to fetch threat intelligence')
+        setError('Invalid IP address. Please enter a valid IPv4 or IPv6 address.')
       }
+      setResult(null)
     } finally {
       setLoading(false)
     }
   }
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    lookup(query)
+  }
+
+  const isMalicious = result?.known_malicious ?? ((result?.abuse_score ?? 0) > 50)
+
   return (
-    <div style={styles.container}>
-      <div>
-        <h2 style={styles.pageTitle}>Threat Intelligence & IP Reputation</h2>
-        <span style={styles.pageSubtitle}>
-          Enrich external IP addresses with AbuseIPDB, VirusTotal, and MaxMind GeoIP metadata (RFC1918 Private IPs auto-filtered)
-        </span>
-      </div>
+    <div className="space-y-5 max-w-3xl select-none">
+      <Panel>
+        <SectionHeader title="Threat Intelligence" sub="IP reputation, ASN geolocation, and threat categorization lookup" />
 
-      {/* Search Input Bar */}
-      <div style={styles.searchBar}>
-        <input
-          type="text"
-          style={styles.input}
-          placeholder="Enter IPv4 / IPv6 address (e.g. 185.220.101.5)..."
-          value={ipInput}
-          onChange={(e) => setIpInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleLookup() }}
-        />
-        <button style={styles.button} onClick={() => handleLookup()} disabled={loading}>
-          {loading ? 'Searching...' : 'Enrich Threat Intel'}
-        </button>
+        <form onSubmit={handleSubmit} className="flex gap-2 mb-4">
+          <div className="relative flex-1">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--tx-4)' }} />
+            <input
+              className="w-full text-[13px] font-mono pl-9 pr-4 py-2.5 rounded-lg outline-none transition-colors"
+              style={{
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+                color: 'var(--tx-1)',
+              }}
+              placeholder="Enter IPv4 or IPv6 address…"
+              value={query}
+              onChange={e => { setQuery(e.target.value); setError('') }}
+              onFocus={e => (e.target.style.borderColor = 'var(--accent-border)')}
+              onBlur={e => (e.target.style.borderColor = 'var(--border)')}
+            />
+          </div>
+          <button
+            type="submit"
+            className="px-4 py-2.5 rounded-lg text-[13px] font-mono font-medium transition-colors"
+            style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)', color: 'var(--accent)' }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
+            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+          >
+            Lookup
+          </button>
+        </form>
 
-        <div style={styles.sampleButtons}>
-          <span style={styles.sampleLabel}>Quick Samples:</span>
-          <button style={styles.sampleBtn} onClick={() => { setIpInput('185.220.101.5'); handleLookup('185.220.101.5'); }}>185.220.101.5 (Tor)</button>
-          <button style={styles.sampleBtn} onClick={() => { setIpInput('193.56.29.11'); handleLookup('193.56.29.11'); }}>193.56.29.11 (Botnet C2)</button>
-          <button style={styles.sampleBtn} onClick={() => { setIpInput('192.168.10.50'); handleLookup('192.168.10.50'); }}>192.168.10.50 (LAN)</button>
+        <div className="flex flex-wrap gap-2 mb-1">
+          <span className="text-[11px] font-mono" style={{ color: 'var(--tx-5)' }}>Quick samples:</span>
+          {SAMPLE_IPS.map(ip => (
+            <button
+              key={ip}
+              onClick={() => { setQuery(ip); lookup(ip) }}
+              className="text-[11px] font-mono transition-opacity hover:opacity-70"
+              style={{ color: 'var(--accent)' }}
+            >
+              {ip}
+            </button>
+          ))}
         </div>
-      </div>
 
-      {error && <div style={styles.errorBox}>{error}</div>}
+        {error && (
+          <div className="mt-3 p-3.5 rounded-lg" style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)' }}>
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={15} style={{ color: 'var(--crit)' }} />
+              <p className="text-[13px] font-mono font-semibold" style={{ color: 'var(--crit)' }}>{error}</p>
+            </div>
+          </div>
+        )}
+      </Panel>
 
-      {/* Threat Intelligence Result Card */}
-      {intel && (
-        <div style={styles.resultGrid}>
-          {/* Overview Card */}
-          <div style={styles.card}>
-            <div style={styles.cardHeader}>
-              <div>
-                <h3 style={styles.ipTitle}>{intel.ip}</h3>
-                <span style={styles.orgText}>{intel.organization} — {intel.isp}</span>
-              </div>
-              <span
-                style={{
-                  ...styles.maliciousBadge,
-                  backgroundColor: intel.known_malicious ? '#dc2626' : '#059669',
-                }}
-              >
-                {intel.known_malicious ? 'MALICIOUS THREAT' : 'CLEAN / TRUSTED'}
+      {loading && (
+        <Panel style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
+          <div className="w-6 h-6 rounded-full border-2 animate-spin"
+            style={{ borderColor: 'var(--border)', borderTopColor: 'var(--accent)' }} />
+          <span className="ml-3 text-[13px] font-mono" style={{ color: 'var(--tx-4)' }}>Querying threat intelligence database…</span>
+        </Panel>
+      )}
+
+      {result && !loading && (
+        <Panel style={{ border: `2px solid ${isMalicious ? 'var(--crit-border)' : 'var(--low-border)'}` }}>
+          <div className="flex items-start gap-4 mb-5">
+            <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+              style={{ background: isMalicious ? 'var(--crit-dim)' : 'var(--low-dim)' }}>
+              {isMalicious
+                ? <AlertTriangle size={22} style={{ color: 'var(--crit)' }} />
+                : <CheckCircle size={22} style={{ color: 'var(--low)' }} />
+              }
+            </div>
+            <div>
+              <p className="font-mono text-xl font-bold" style={{ color: 'var(--accent)' }}>{result.ip}</p>
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-mono font-semibold mt-1"
+                style={isMalicious
+                  ? { background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }
+                  : { background: 'var(--low-dim)',  border: '1px solid var(--low-border)',  color: 'var(--low)'  }
+                }>
+                {isMalicious ? '⚠ KNOWN MALICIOUS THREAT' : '✓ CLEAN / TRUSTED HOST'}
               </span>
             </div>
-
-            <div style={styles.metricsRow}>
-              <div style={styles.metricBox}>
-                <span style={styles.metricLabel}>Abuse Confidence Score</span>
-                <span style={{ ...styles.metricVal, color: intel.abuse_score > 50 ? '#ef4444' : '#10b981' }}>
-                  {intel.abuse_score}%
-                </span>
-              </div>
-
-              <div style={styles.metricBox}>
-                <span style={styles.metricLabel}>Reputation Score</span>
-                <span style={{ ...styles.metricVal, color: intel.reputation_score < 50 ? '#ef4444' : '#10b981' }}>
-                  {intel.reputation_score} / 100
-                </span>
-              </div>
-
-              <div style={styles.metricBox}>
-                <span style={styles.metricLabel}>Category</span>
-                <span style={styles.metricValText}>{intel.threat_category}</span>
-              </div>
-            </div>
           </div>
 
-          {/* GeoIP Details Card */}
-          <div style={styles.card}>
-            <h3 style={styles.sectionTitle}>Geolocation & ASN Metadata</h3>
-            <div style={styles.detailsList}>
-              <div style={styles.detailItem}>
-                <span style={styles.dLabel}>Country:</span>
-                <span style={styles.dVal}>{intel.country}</span>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
+            {[
+              ['IP Address', result.ip],
+              ['Country', result.country || 'N/A'],
+              ['City', result.city || 'N/A'],
+              ['ASN', result.asn || 'N/A'],
+              ['ISP', result.isp || 'N/A'],
+              ['Threat Category', result.threat_category || 'N/A'],
+              ['IP Type', result.is_private ? 'Private (RFC1918)' : 'Public Internet IP'],
+              ['Latitude', typeof result.latitude === 'number' ? result.latitude.toFixed(4) : 'N/A'],
+              ['Longitude', typeof result.longitude === 'number' ? result.longitude.toFixed(4) : 'N/A'],
+            ].map(([k, v]) => (
+              <div key={k as string}>
+                <p className="text-[10px] font-mono uppercase tracking-wider mb-0.5" style={{ color: 'var(--tx-5)' }}>{k}</p>
+                <p className="text-[12px] font-mono font-medium" style={{ color: 'var(--tx-2)' }}>{v}</p>
               </div>
-              <div style={styles.detailItem}>
-                <span style={styles.dLabel}>City:</span>
-                <span style={styles.dVal}>{intel.city}</span>
+            ))}
+          </div>
+
+          <div className="pt-4 space-y-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <div>
+              <div className="flex justify-between text-[11px] font-mono mb-1">
+                <span style={{ color: 'var(--tx-4)' }}>Abuse Score</span>
+                <span style={{ color: 'var(--crit)' }}>{result.abuse_score}%</span>
               </div>
-              <div style={styles.detailItem}>
-                <span style={styles.dLabel}>Coordinates:</span>
-                <span style={styles.dVal}>{intel.latitude}, {intel.longitude}</span>
+              <Bar value={result.abuse_score} color={isMalicious ? 'var(--crit)' : 'var(--low)'} />
+            </div>
+            <div>
+              <div className="flex justify-between text-[11px] font-mono mb-1">
+                <span style={{ color: 'var(--tx-4)' }}>Reputation Score</span>
+                <span style={{ color: 'var(--low)' }}>{result.reputation_score}/100</span>
               </div>
-              <div style={styles.detailItem}>
-                <span style={styles.dLabel}>Autonomous System (ASN):</span>
-                <span style={styles.dVal}>{intel.asn}</span>
-              </div>
-              <div style={styles.detailItem}>
-                <span style={styles.dLabel}>Private IP (RFC1918):</span>
-                <span style={styles.dVal}>{intel.is_private ? 'Yes (Local Network)' : 'No (Public WAN)'}</span>
-              </div>
+              <Bar value={result.reputation_score} color="var(--low)" />
             </div>
           </div>
-        </div>
+        </Panel>
       )}
     </div>
   )
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  container: { padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' },
-  pageTitle: { fontSize: '20px', fontWeight: 700, color: '#f0f6fc', margin: 0 },
-  pageSubtitle: { fontSize: '12px', color: '#8b949e' },
-  searchBar: { backgroundColor: '#0d1117', border: '1px solid #21262d', borderRadius: '8px', padding: '16px', display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' },
-  input: { flex: 1, minWidth: '240px', backgroundColor: '#161b22', color: '#f0f6fc', border: '1px solid #30363d', borderRadius: '6px', padding: '10px 14px', fontSize: '13px', outline: 'none' },
-  button: { backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', padding: '10px 20px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' },
-  sampleButtons: { display: 'flex', alignItems: 'center', gap: '8px' },
-  sampleLabel: { fontSize: '11px', color: '#8b949e' },
-  sampleBtn: { backgroundColor: '#21262d', color: '#58a6ff', border: '1px solid #30363d', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer' },
-  errorBox: { backgroundColor: '#7f1d1d33', border: '1px solid #ef4444', color: '#fca5a5', padding: '12px', borderRadius: '6px', fontSize: '13px' },
-  resultGrid: { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' },
-  card: { backgroundColor: '#0d1117', border: '1px solid #21262d', borderRadius: '8px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' },
-  cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
-  ipTitle: { fontSize: '22px', fontWeight: 700, color: '#f0f6fc', margin: 0, fontFamily: 'monospace' },
-  orgText: { fontSize: '12px', color: '#8b949e' },
-  maliciousBadge: { color: '#fff', fontSize: '11px', fontWeight: 700, padding: '4px 10px', borderRadius: '4px', textTransform: 'uppercase' },
-  metricsRow: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' },
-  metricBox: { backgroundColor: '#161b22', borderRadius: '6px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '4px' },
-  metricLabel: { fontSize: '10px', color: '#8b949e', textTransform: 'uppercase', fontWeight: 700 },
-  metricVal: { fontSize: '22px', fontWeight: 700 },
-  metricValText: { fontSize: '13px', fontWeight: 600, color: '#f0f6fc' },
-  sectionTitle: { fontSize: '15px', fontWeight: 700, color: '#f0f6fc', margin: 0 },
-  detailsList: { display: 'flex', flexDirection: 'column', gap: '10px' },
-  detailItem: { display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderBottom: '1px solid #161b22', paddingBottom: '6px' },
-  dLabel: { color: '#8b949e' },
-  dVal: { color: '#f0f6fc', fontWeight: 600 },
 }

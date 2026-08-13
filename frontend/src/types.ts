@@ -2,7 +2,27 @@
  * Shared TypeScript type definitions for Enterprise SOC IDS Platform.
  */
 
-export type SeverityLevel = 'low' | 'medium' | 'high' | 'critical' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+export type SeverityLevel = 'low' | 'medium' | 'high' | 'critical'
+
+export interface Report {
+  id: string
+  title: string
+  report_type: string
+  created_at: string
+  summary: {
+    title?: string
+    report_type?: string
+    time_window?: { start: string; end: string }
+    metrics?: {
+      total_alerts?: number
+      known_attacks?: number
+      zero_day_anomalies?: number
+      critical_severity?: number
+      high_severity?: number
+    }
+    recommendations?: string[]
+  }
+}
 
 export interface ShapExplanation {
   feature_names: string[]
@@ -33,8 +53,6 @@ export interface Alert {
   notes?: string
   tags?: string[]
   reviewed?: boolean
-  risk_score?: number
-  risk_level?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
   feedback_label?: string
   threat_intel?: ThreatIntelData
 }
@@ -100,8 +118,13 @@ export interface TrafficStats {
   total_alerts_generated: number
   status: string
   packets_per_sec?: number
-  bytes_per_sec?: number
+  flows_per_sec?: number
   active_flows?: number
+  bandwidth_bps?: number
+  bytes_per_sec?: number
+  total_packets_captured?: number
+  known_attacks_detected?: number
+  unknown_attacks_detected?: number
   top_src_ips?: Array<{ ip: string; count: number }>
 }
 
@@ -173,21 +196,6 @@ export interface AuditLog {
   details: Record<string, unknown>
 }
 
-export interface ModelDriftStatus {
-  status: 'NORMAL' | 'WARNING'
-  has_drift: boolean
-  drift_score: number
-  p_value: number
-  message: string
-  simple_explanation: string
-  recommendation: string
-  metrics_evaluated?: {
-    recent_alerts_sample: number
-    stage2_zero_day_ratio: number
-    false_positive_ratio: number
-  }
-}
-
 export interface ModelEvaluationMetrics {
   confusion_matrix: {
     tp: number
@@ -210,7 +218,6 @@ export interface ModelEvaluationMetrics {
   }
   roc_curve: Array<{ fpr: number; tpr: number }>
   precision_recall_curve: Array<{ recall: number; precision: number }>
-  drift_status?: ModelDriftStatus
   feedback_counts: {
     total_analyst_reviews: number
     confirmed_attacks: number
@@ -277,137 +284,129 @@ export interface AnalyticsOverview {
   top_ports: Array<{ port: number; count: number }>
 }
 
-export interface AttackerProfile {
-  source_ip: string
-  first_seen: string
-  last_seen: string
-  total_alerts: number
-  attack_types: string[]
-  port_scan_count: number
-  brute_force_count: number
-  honeypot_interactions: number
-  critical_alerts: number
-  high_alerts: number
-  medium_alerts: number
-  low_alerts: number
-  risk_score: number
-  risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
-  threat_intelligence?: {
-    ip?: string
-    country?: string
-    country_code?: string
-    isp?: string
-    reputation_score?: number
-    is_malicious?: boolean
-  }
-  recent_activity?: Array<{
-    id: string
-    timestamp: string
-    type: 'ALERT' | 'HONEYPOT'
-    attack_type?: string
-    event_type?: string
-    severity: string
-    dst_ip?: string
-    dst_port?: number
-    request_type?: string
-  }>
-}
-
-export interface CorrelatedIncident {
-  id: string
-  title: string
-  source_ip: string
-  destination_ip?: string
-  start_time: string
-  last_activity: string
-  alert_count: number
-  attack_types: string[]
-  honeypot_interactions: number
-  risk_score: number
-  status: 'NEW' | 'INVESTIGATING' | 'RESOLVED'
-  created_at?: string
-  linked_alerts?: Alert[]
-  honeypot_events?: Array<{
-    id: string
-    timestamp: string
-    event_type: string
-    severity: string
-    service: string
-    request_type: string
-  }>
-}
-
-export interface ResponseRecommendation {
-  id: string
-  source_ip: string
-  recommended_action: string
-  reason: string
-  risk_score: number
-  risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
-  related_evidence: {
-    total_alerts: number
-    port_scan_count: number
-    brute_force_count: number
-    honeypot_interactions: number
-    critical_alerts: number
-    attack_types: string[]
-  }
-  suggested_command: string
-  requires_analyst_approval: boolean
-}
-
 export type WebSocketMessage =
   | { type: 'connected'; channel: string; recent_alerts?: Alert[] }
   | { type: 'ping' }
-  | { type: 'honeypot_event'; event: HoneypotEvent }
-  | { type: 'correlated_incident'; incident: CorrelatedIncident }
-  | { type: 'risk_score_update'; source_ip: string; risk_score: number; risk_level: string }
   | Alert
   | TrafficStats
 
 export interface HoneypotStatus {
-  status: 'running' | 'stopped'
-  host: string
-  port: number
-  service: string
-  total_interactions_session: number
-  total_events_database: number
-  uptime_seconds: number
+  running?: boolean
+  service?: string
+  port?: number
+  status?: 'active' | 'listening' | 'stopped' | string
+  events_count?: number
+  active_listeners?: string[] | Record<string, unknown>
+  services?: Array<{ name: string; port: number; active: boolean }>
+  host?: string
+  total_events_database?: number
+  total_interactions_session?: number
+  total_captured_events?: number
+  active_since?: string | null
+  interface?: string
+  error_message?: string | null
 }
 
 export interface HoneypotStats {
-  by_event_type: Record<string, number>
-  by_severity: Record<string, number>
-  top_attackers: Array<{ ip: string; count: number }>
+  total_events: number
+  unique_ips?: number
+  unique_attackers?: number
+  high_risk_ips?: number
+  top_services: Array<{ service: string; hits?: number; count?: number }>
+  correlated_alerts?: number
+  events?: HoneypotEvent[]
+  top_attackers: Array<{ source_ip?: string; ip?: string; hits?: number; count?: number; event_count?: number; risk_score?: number; country?: string; risk_level?: string }>
+  by_event_type?: Record<string, number>
+  by_severity?: Record<string, number>
 }
 
 export interface HoneypotEvent {
   id: string
   timestamp: string
+  attacker_ip?: string
   src_ip: string
-  src_port: number
-  dst_ip: string
-  dst_port: number
-  protocol: string
+  dst_ip?: string
+  src_port?: number
+  dst_port?: number
   service: string
-  request_type: string
-  event_type: string
-  severity: string
-  session_id?: string | null
-  payload?: Record<string, unknown> | null
+  port?: number
+  request_payload?: string
+  payload?: string
+  command?: string
+  severity: SeverityLevel
+  location?: string
+  correlated_alert_id?: string
+  request_type?: string
+  event_type?: string
+  action_taken?: string
 }
 
 export interface HoneypotCorrelatedAlert {
-  id: string
+  alert_id: string
+  id?: string
+  honeypot_event_id?: string
   timestamp: string
+  attacker_ip?: string
   src_ip: string
-  dst_ip: string
+  service: string
   attack_type: string
-  stage: number
-  severity: string
-  confidence: number
+  severity: SeverityLevel
+  stage?: number
   tags?: string[]
-  honeypot_evidence?: Record<string, unknown> | null
 }
 
+export interface AttackerProfile {
+  ip: string
+  source_ip: string
+  first_seen: string
+  last_seen: string
+  total_attacks: number
+  total_alerts: number
+  port_scan_count: number
+  brute_force_count: number
+  honeypot_interactions: number
+  attack_types: string[]
+  severity: SeverityLevel
+  risk_score: number
+  risk_level: string
+  reputation_score?: number
+  country?: string
+  city?: string
+  isp?: string
+  associated_alerts?: string[]
+  threat_intelligence?: ThreatIntelData
+}
+
+export interface CorrelatedIncident {
+  id: string
+  title: string
+  timestamp?: string
+  start_time: string
+  last_activity: string
+  severity?: SeverityLevel
+  status: 'NEW' | 'INVESTIGATING' | 'RESOLVED' | 'OPEN' | 'CLOSED' | string
+  attacker_ip?: string
+  source_ip: string
+  destination_ip?: string
+  target_ip?: string
+  attack_vector?: string
+  correlated_alerts_count?: number
+  alert_count: number
+  honeypot_interactions: number
+  risk_score: number
+  attack_types: string[]
+  linked_alerts?: Alert[]
+  honeypot_events?: HoneypotEvent[]
+  alerts?: Alert[]
+  summary?: string
+  recommended_actions?: string[]
+}
+
+export interface ModelDriftStatus {
+  status: string
+  drift_detected: boolean
+  drift_score: number
+  last_evaluated: string
+  feature_drift?: Record<string, number>
+}
 

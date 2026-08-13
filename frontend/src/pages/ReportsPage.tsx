@@ -1,141 +1,231 @@
-import React, { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { FileText, Download, Plus, RefreshCw, FileCode, FileSpreadsheet } from 'lucide-react'
 import apiClient from '../api/client'
-import type { ReportGenerationResponse } from '../types'
+import { StatCard, SectionHeader, Panel, Table, Tr, Td, LoadingState, EmptyState } from '../components/ui'
+import type { Report } from '../types'
+
+type Period = 'daily' | 'weekly' | 'monthly' | 'custom'
 
 export default function ReportsPage() {
-  const [reportType, setReportType] = useState<string>('daily')
-  const [loading, setLoading] = useState<boolean>(false)
-  const [reportResult, setReportResult] = useState<ReportGenerationResponse | null>(null)
+  const [reports, setReports] = useState<Report[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [generateLoading, setGenerateLoading] = useState<boolean>(false)
+  const [selectedReport, setSelectedReport] = useState<Report | null>(null)
+  const [selectedType, setSelectedType] = useState<Period>('daily')
+  const [customTitle, setCustomTitle] = useState<string>('')
 
-  const handleGenerate = async () => {
-    setLoading(true)
+  // Fetch reports list: GET /reports
+  const fetchReports = useCallback(async () => {
     try {
-      const res = await apiClient.post<ReportGenerationResponse>('/reports/generate', { report_type: reportType })
-      setReportResult(res.data)
-    } catch (e) {
-      console.warn('Failed to generate report:', e)
+      setLoading(true)
+      const res = await apiClient.get<any>('/reports')
+      const items = Array.isArray(res.data) ? res.data : (res.data?.reports || [])
+      setReports(items)
+      if (items.length > 0 && !selectedReport) {
+        setSelectedReport(items[0])
+      }
+    } catch (err) {
+      console.error('Failed to fetch SOC reports list:', err)
+      setReports([])
     } finally {
       setLoading(false)
     }
+  }, [selectedReport])
+
+  useEffect(() => {
+    fetchReports()
+  }, [fetchReports])
+
+  // Generate Report: POST /reports/generate
+  const handleGenerateReport = async () => {
+    try {
+      setGenerateLoading(true)
+      const payload: Record<string, any> = {
+        report_type: selectedType,
+      }
+      if (customTitle.trim()) {
+        payload.title = customTitle.trim()
+      }
+
+      const res = await apiClient.post<any>('/reports/generate', payload)
+      alert(`Successfully generated ${selectedType.toUpperCase()} SOC Executive Report!`)
+      setCustomTitle('')
+      await fetchReports()
+      if (res.data?.report_id) {
+        const newlyCreated: Report = {
+          id: res.data.report_id,
+          title: res.data.report?.title || `Executive SOC Report (${selectedType})`,
+          report_type: selectedType,
+          created_at: res.data.created_at || new Date().toISOString(),
+          summary: res.data.report || {},
+        }
+        setSelectedReport(newlyCreated)
+      }
+    } catch (err: any) {
+      console.error('Failed to generate report:', err)
+      alert(`Report generation failed: ${err.response?.data?.detail || err.message}`)
+    } finally {
+      setGenerateLoading(false)
+    }
   }
 
-  const handleExport = (format: 'pdf' | 'csv' | 'json') => {
-    if (!reportResult?.report_id) return
-    const url = `${apiClient.defaults.baseURL}/reports/${reportResult.report_id}/export?export_format=${format}`
-    window.open(url, '_blank')
+  // Export Report: GET /reports/{id}/export?export_format=pdf|csv|json
+  const handleExport = (reportId: string, format: 'pdf' | 'csv' | 'json') => {
+    const baseURL = apiClient.defaults.baseURL || '/api'
+    const exportUrl = `${baseURL}/reports/${encodeURIComponent(reportId)}/export?export_format=${format}`
+    window.open(exportUrl, '_blank')
   }
+
+  const activeSummary = selectedReport?.summary
+  const metrics = activeSummary?.metrics ?? {}
+  const recommendations: string[] = activeSummary?.recommendations ?? []
 
   return (
-    <div style={styles.container}>
-      <div>
-        <h2 style={styles.pageTitle}>Executive SOC Security Reports & Exports</h2>
-        <span style={styles.pageSubtitle}>
-          Generate Daily, Weekly, Monthly, or Custom SOC compliance reports and export to PDF, CSV, or JSON
-        </span>
-      </div>
+    <div className="space-y-5 max-w-5xl select-none">
+      <Panel>
+        <SectionHeader title="SOC Executive Security Reports" sub="Automated and custom executive reporting engine" />
 
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>Report Configuration</h3>
-        <div style={styles.row}>
-          <div style={styles.selectGroup}>
-            <label style={styles.label}>Select Report Time Window:</label>
-            <select
-              style={styles.select}
-              value={reportType}
-              onChange={(e) => setReportType(e.target.value)}
-            >
-              <option value="daily">Daily Executive Summary (Past 24h)</option>
-              <option value="weekly">Weekly SOC Audit Report (Past 7 Days)</option>
-              <option value="monthly">Monthly Threat Landscape Report (Past 30 Days)</option>
-            </select>
-          </div>
+        {/* Generate Report Form */}
+        <div className="p-4 rounded-xl mb-5 space-y-3" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+          <p className="text-[11px] font-mono uppercase tracking-wider font-semibold" style={{ color: 'var(--tx-3)' }}>
+            Generate New Report
+          </p>
 
-          <button style={styles.button} onClick={handleGenerate} disabled={loading}>
-            {loading ? 'Compiling SOC Data...' : 'Generate Executive Report'}
-          </button>
-        </div>
-      </div>
-
-      {reportResult && (
-        <div style={styles.card}>
-          <div style={styles.reportHeader}>
-            <div>
-              <h3 style={styles.reportTitle}>{reportResult.report?.title}</h3>
-              <span style={styles.reportMeta}>
-                Generated: {new Date(reportResult.created_at).toLocaleString()} | ID: {reportResult.report_id}
-              </span>
-            </div>
-
-            <div style={styles.exportButtonGroup}>
-              <button style={styles.pdfBtn} onClick={() => handleExport('pdf')}>
-                Export PDF
-              </button>
-              <button style={styles.csvBtn} onClick={() => handleExport('csv')}>
-                Export CSV
-              </button>
-              <button style={styles.jsonBtn} onClick={() => handleExport('json')}>
-                Export JSON
-              </button>
-            </div>
-          </div>
-
-          <div style={styles.metricsGrid}>
-            <div style={styles.mBox}>
-              <span style={styles.mLabel}>Total Detections</span>
-              <span style={styles.mVal}>{reportResult.report?.metrics?.total_alerts}</span>
-            </div>
-            <div style={styles.mBox}>
-              <span style={styles.mLabel}>Known Attacks</span>
-              <span style={{ ...styles.mVal, color: '#3b82f6' }}>{reportResult.report?.metrics?.known_attacks}</span>
-            </div>
-            <div style={styles.mBox}>
-              <span style={styles.mLabel}>Zero-Day Anomalies</span>
-              <span style={{ ...styles.mVal, color: '#a855f7' }}>{reportResult.report?.metrics?.zero_day_anomalies}</span>
-            </div>
-            <div style={styles.mBox}>
-              <span style={styles.mLabel}>Critical Severity</span>
-              <span style={{ ...styles.mVal, color: '#ef4444' }}>{reportResult.report?.metrics?.critical_severity}</span>
-            </div>
-          </div>
-
-          <div style={styles.recSection}>
-            <h4 style={styles.recTitle}>SOC Action Items & Recommendations</h4>
-            <ul style={styles.recList}>
-              {reportResult.report?.recommendations?.map((rec: string, idx: number) => (
-                <li key={idx} style={styles.recItem}>{rec}</li>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              {(['daily', 'weekly', 'monthly', 'custom'] as Period[]).map(p => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setSelectedType(p)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all capitalize"
+                  style={selectedType === p
+                    ? { background: 'var(--accent-dim)', border: '1px solid var(--accent-border)', color: 'var(--accent)' }
+                    : { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--tx-4)' }
+                  }
+                >
+                  {p}
+                </button>
               ))}
-            </ul>
+            </div>
+
+            <input
+              type="text"
+              placeholder="Optional Custom Title..."
+              value={customTitle}
+              onChange={e => setCustomTitle(e.target.value)}
+              className="flex-1 min-w-[200px] text-xs font-mono px-3 py-1.5 rounded-lg outline-none"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--tx-1)' }}
+            />
+
+            <button
+              onClick={handleGenerateReport}
+              disabled={generateLoading}
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all disabled:opacity-40"
+              style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)', color: 'var(--accent)' }}
+            >
+              {generateLoading ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <Plus size={13} />
+              )}
+              <span>Generate Report</span>
+            </button>
           </div>
         </div>
+
+        {/* Existing Reports List */}
+        {loading && reports.length === 0 ? (
+          <LoadingState />
+        ) : reports.length > 0 ? (
+          <Table headers={['Report ID', 'Title', 'Type', 'Generated Date', 'Export Actions']}>
+            {reports.map(r => {
+              return (
+                <Tr key={r.id} onClick={() => setSelectedReport(r)}>
+                  <Td mono muted>{r.id.slice(0, 8)}...</Td>
+                  <Td font-bold>{r.title || `Executive SOC Report (${r.report_type})`}</Td>
+                  <Td mono muted className="capitalize">{r.report_type}</Td>
+                  <Td mono muted>{r.created_at ? r.created_at.replace('T', ' ').slice(0, 19) : 'N/A'}</Td>
+                  <Td>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleExport(r.id, 'pdf') }}
+                        className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono font-semibold"
+                        style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }}
+                      >
+                        <FileText size={10} />
+                        <span>PDF</span>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleExport(r.id, 'csv') }}
+                        className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono font-semibold"
+                        style={{ background: 'var(--low-dim)', border: '1px solid var(--low-border)', color: 'var(--low)' }}
+                      >
+                        <FileSpreadsheet size={10} />
+                        <span>CSV</span>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleExport(r.id, 'json') }}
+                        className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono font-semibold"
+                        style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)', color: 'var(--accent)' }}
+                      >
+                        <FileCode size={10} />
+                        <span>JSON</span>
+                      </button>
+                    </div>
+                  </Td>
+                </Tr>
+              )
+            })}
+          </Table>
+        ) : (
+          <EmptyState message="No SOC reports generated yet" />
+        )}
+      </Panel>
+
+      {/* Selected Report Inspection Panel */}
+      {selectedReport && (
+        <>
+          <Panel>
+            <SectionHeader
+              title={selectedReport.title || `Report: ${selectedReport.id}`}
+              sub={`Generated on ${selectedReport.created_at ? selectedReport.created_at.replace('T', ' ').slice(0, 19) : 'N/A'}`}
+            >
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleExport(selectedReport.id, 'pdf')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold"
+                  style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }}
+                >
+                  <Download size={12} />
+                  <span>Download PDF</span>
+                </button>
+              </div>
+            </SectionHeader>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 my-4">
+              <StatCard label="Total Window Alerts"  value={metrics.total_alerts?.toLocaleString() ?? 0} accent />
+              <StatCard label="Known Attacks"       value={metrics.known_attacks?.toLocaleString() ?? 0} />
+              <StatCard label="Zero-Day Anomalies"  value={metrics.zero_day_anomalies?.toLocaleString() ?? 0} critical={(metrics.zero_day_anomalies ?? 0) > 0} />
+              <StatCard label="Critical Severity"   value={metrics.critical_severity?.toLocaleString() ?? 0} critical={(metrics.critical_severity ?? 0) > 0} />
+            </div>
+          </Panel>
+
+          {recommendations.length > 0 && (
+            <Panel>
+              <SectionHeader title="Executive Recommendations" sub="AI-assisted security guidance" />
+              <ol className="space-y-2.5">
+                {recommendations.map((rec, idx) => (
+                  <li key={idx} className="flex gap-3 text-xs font-mono">
+                    <span className="w-5 text-right font-bold" style={{ color: 'var(--accent)' }}>{idx + 1}.</span>
+                    <p style={{ color: 'var(--tx-2)' }}>{rec}</p>
+                  </li>
+                ))}
+              </ol>
+            </Panel>
+          )}
+        </>
       )}
     </div>
   )
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  container: { padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' },
-  pageTitle: { fontSize: '20px', fontWeight: 700, color: '#f0f6fc', margin: 0 },
-  pageSubtitle: { fontSize: '12px', color: '#8b949e' },
-  card: { backgroundColor: '#0d1117', border: '1px solid #21262d', borderRadius: '8px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' },
-  cardTitle: { fontSize: '15px', fontWeight: 700, color: '#f0f6fc', margin: 0 },
-  row: { display: 'flex', alignItems: 'flex-end', gap: '16px' },
-  selectGroup: { display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 },
-  label: { fontSize: '12px', color: '#8b949e', fontWeight: 600 },
-  select: { backgroundColor: '#161b22', color: '#f0f6fc', border: '1px solid #30363d', borderRadius: '6px', padding: '10px 14px', fontSize: '13px', outline: 'none' },
-  button: { backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', padding: '10px 20px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' },
-  reportHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
-  reportTitle: { fontSize: '18px', fontWeight: 700, color: '#f0f6fc', margin: 0 },
-  reportMeta: { fontSize: '11px', color: '#8b949e' },
-  exportButtonGroup: { display: 'flex', gap: '8px' },
-  pdfBtn: { backgroundColor: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' },
-  csvBtn: { backgroundColor: '#059669', color: '#fff', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' },
-  jsonBtn: { backgroundColor: '#4f46e5', color: '#fff', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' },
-  metricsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' },
-  mBox: { backgroundColor: '#161b22', borderRadius: '6px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '4px' },
-  mLabel: { fontSize: '10px', color: '#8b949e', textTransform: 'uppercase', fontWeight: 700 },
-  mVal: { fontSize: '22px', fontWeight: 700, color: '#f0f6fc' },
-  recSection: { backgroundColor: '#161b22', borderRadius: '6px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' },
-  recTitle: { fontSize: '13px', fontWeight: 700, color: '#f0f6fc', margin: 0 },
-  recList: { margin: 0, paddingLeft: '20px', color: '#c9d1d9', fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '6px' },
-  recItem: { lineHeight: 1.4 },
 }

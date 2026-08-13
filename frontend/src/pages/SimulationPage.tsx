@@ -1,200 +1,280 @@
-import React, { useState } from 'react'
-import axios from 'axios'
+import { useState, useEffect, useCallback } from 'react'
+import { Play, RefreshCw, ChevronRight, AlertTriangle } from 'lucide-react'
 import apiClient from '../api/client'
-import type { SimulationResult } from '../types'
+import { Panel, SectionHeader, SeverityBadge, Severity } from '../components/ui'
+
+const ATTACK_PATTERNS: Array<{ id: string; label: string; desc: string; severity: Severity }> = [
+  { id: 'Port Scan',   label: 'Port Scan',   desc: 'TCP/UDP port enumeration', severity: 'HIGH' },
+  { id: 'SYN Flood',   label: 'SYN Flood',   desc: 'TCP half-open connection flood', severity: 'CRITICAL' },
+  { id: 'ICMP Flood',  label: 'ICMP Flood',  desc: 'ICMP echo request flood', severity: 'HIGH' },
+  { id: 'UDP Flood',   label: 'UDP Flood',   desc: 'UDP datagram flood', severity: 'HIGH' },
+  { id: 'Brute Force', label: 'Brute Force', desc: 'Credential stuffing attack', severity: 'CRITICAL' },
+  { id: 'DNS Flood',   label: 'DNS Flood',   desc: 'DNS query amplification', severity: 'MEDIUM' },
+  { id: 'HTTP Flood',  label: 'HTTP Flood',  desc: 'Layer 7 HTTP GET/POST flood', severity: 'HIGH' },
+  { id: 'Slowloris',   label: 'Slowloris',   desc: 'Slow HTTP connection hold', severity: 'MEDIUM' },
+]
+
+interface SimulationResult {
+  simulation_id: string
+  attack_type: string
+  status: string
+  packets_generated: number
+  flows_generated: number
+  detection_time_ms: number
+  known_attack_result: string
+  unknown_attack_result: string
+  timestamp: string
+  message: string
+  target_ip?: string
+  packet_count_requested?: number
+}
+
+const PIPELINE_STEPS = [
+  'SELECT ATTACK',
+  'CONFIGURE TARGET',
+  'POST /SIMULATION/RUN',
+  'PUSH REDIS STREAM',
+  'STAGE 1 ML WORKER',
+  'STAGE 2 AUTOENCODER',
+  'ALERT BROADCAST',
+]
 
 export default function SimulationPage() {
-  const [selectedAttack, setSelectedAttack] = useState<string>('Port Scan')
-  const [packetCount, setPacketCount] = useState<number>(100)
+  const [selectedAttack, setSelectedAttack] = useState<string>('SYN Flood')
   const [targetIp, setTargetIp] = useState<string>('172.16.0.5')
+  const [packetCount, setPacketCount] = useState<number>(100)
+  const [availablePatterns, setAvailablePatterns] = useState<string[]>([])
+
   const [loading, setLoading] = useState<boolean>(false)
   const [result, setResult] = useState<SimulationResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [activeStep, setActiveStep] = useState<number>(-1)
 
-  const attacks = [
-    { name: 'Port Scan', desc: 'Rapid SYN scanning across sequential ports', category: 'Reconnaissance' },
-    { name: 'SYN Flood', desc: 'High-volume TCP SYN flood targeting socket exhaustion', category: 'DoS / DDoS' },
-    { name: 'ICMP Flood', desc: 'ICMP Echo Request ping storm', category: 'DoS / DDoS' },
-    { name: 'UDP Flood', desc: 'UDP packet flood targeting high-bandwidth depletion', category: 'DoS / DDoS' },
-    { name: 'Brute Force', desc: 'SSH/FTP credential brute force attempt', category: 'Unauthorized Access' },
-    { name: 'DNS Flood', desc: 'High-volume DNS query flood', category: 'Application DoS' },
-    { name: 'HTTP Flood', desc: 'Layer 7 HTTP GET/POST flood', category: 'Web Attack' },
-    { name: 'Slowloris', desc: 'Slow HTTP request headers holding connections open', category: 'Web DoS' },
-  ]
+  // Fetch backend GET /simulation
+  const fetchPatterns = useCallback(async () => {
+    try {
+      const res = await apiClient.get<any>('/simulation')
+      if (res.data?.available_patterns) {
+        setAvailablePatterns(res.data.available_patterns)
+      }
+    } catch (err) {
+      console.error('Failed to fetch available simulation patterns:', err)
+    }
+  }, [])
 
+  useEffect(() => {
+    fetchPatterns()
+  }, [fetchPatterns])
+
+  // Run Real Simulation: POST /simulation/run
   const handleRunSimulation = async () => {
+    if (!selectedAttack) return
+
     setLoading(true)
     setError(null)
     setResult(null)
+    setActiveStep(0)
+
+    // Step animation simulation for visual feedback
+    const timer = setInterval(() => {
+      setActiveStep(prev => (prev < 3 ? prev + 1 : prev))
+    }, 250)
+
     try {
-      const res = await apiClient.post<SimulationResult>('/simulation/run', {
+      // Send exact request schema: { attack_type, packet_count, target_ip }
+      const payload = {
         attack_type: selectedAttack,
-        packet_count: packetCount,
-        target_ip: targetIp,
-      })
-      setResult(res.data)
-    } catch (e) {
-      if (axios.isAxiosError(e) && e.response?.data?.detail) {
-        setError(String(e.response.data.detail))
-      } else {
-        setError('Simulation execution failed')
+        packet_count: Number(packetCount),
+        target_ip: targetIp.trim(),
       }
+
+      const res = await apiClient.post<SimulationResult>('/simulation/run', payload)
+      clearInterval(timer)
+      setActiveStep(6)
+      setResult({
+        ...res.data,
+        target_ip: targetIp.trim(),
+        packet_count_requested: Number(packetCount),
+      })
+    } catch (err: any) {
+      clearInterval(timer)
+      setActiveStep(-1)
+      console.error('Simulation execution error:', err)
+      setError(err.response?.data?.detail || err.message || 'Simulation run failed')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div style={styles.container}>
-      <div>
-        <h2 style={styles.pageTitle}>Security Attack Simulation Lab</h2>
-        <span style={styles.pageSubtitle}>
-          Safely demonstrate live attack patterns and evaluate real-time hybrid ML pipeline detection in a sandbox
-        </span>
-      </div>
+    <div className="space-y-5 select-none">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-      <div style={styles.twoCol}>
-        {/* Control Panel */}
-        <div style={styles.card}>
-          <h3 style={styles.cardTitle}>Attack Vector Configuration</h3>
-
-          <div style={styles.gridAttacks}>
-            {attacks.map((atk) => (
-              <div
-                key={atk.name}
-                style={{
-                  ...styles.atkBox,
-                  borderColor: selectedAttack === atk.name ? '#3b82f6' : '#21262d',
-                  backgroundColor: selectedAttack === atk.name ? '#1e293b' : '#161b22',
-                }}
-                onClick={() => setSelectedAttack(atk.name)}
-              >
-                <div style={styles.atkHeader}>
-                  <span style={styles.atkName}>{atk.name}</span>
-                  <span style={styles.atkCat}>{atk.category}</span>
-                </div>
-                <span style={styles.atkDesc}>{atk.desc}</span>
-              </div>
-            ))}
+        {/* Attack selection panel */}
+        <Panel className="lg:col-span-1">
+          <SectionHeader title="Attack Pattern" sub="Select demonstration attack scenario" />
+          <div className="space-y-1.5 max-h-[480px] overflow-y-auto pr-1">
+            {ATTACK_PATTERNS.map(a => {
+              const isAvailable = availablePatterns.length === 0 || availablePatterns.includes(a.id)
+              const isSelected = selectedAttack === a.id
+              return (
+                <button
+                  key={a.id}
+                  disabled={loading || !isAvailable}
+                  onClick={() => { setSelectedAttack(a.id); setResult(null); setError(null); setActiveStep(-1) }}
+                  className="w-full text-left p-3 rounded-lg border transition-all text-left"
+                  style={{
+                    background: isSelected ? 'var(--accent-dim)' : 'var(--surface-2)',
+                    borderColor: isSelected ? 'var(--accent-border)' : 'var(--border)',
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono font-bold" style={{ color: isSelected ? 'var(--accent)' : 'var(--tx-1)' }}>
+                      {a.label}
+                    </span>
+                    <SeverityBadge severity={a.severity} />
+                  </div>
+                  <p className="text-[10px] font-mono mt-1" style={{ color: 'var(--tx-4)' }}>{a.desc}</p>
+                </button>
+              )
+            })}
           </div>
+        </Panel>
 
-          <div style={styles.formRow}>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Simulated Packets Count:</label>
-              <input
-                type="number"
-                style={styles.input}
-                value={packetCount}
-                onChange={(e) => setPacketCount(parseInt(e.target.value) || 100)}
-                min={10}
-                max={5000}
-              />
-            </div>
+        {/* Configuration + Pipeline + Results */}
+        <div className="lg:col-span-2 space-y-4">
+          <Panel>
+            <SectionHeader title="Simulation Configuration" sub="Configure target IP and packet batch size" />
 
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Target Victim IP:</label>
-              <input
-                type="text"
-                style={styles.input}
-                value={targetIp}
-                onChange={(e) => setTargetIp(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <button style={styles.runButton} onClick={handleRunSimulation} disabled={loading}>
-            {loading ? 'Executing Attack Vector...' : `Run Safe ${selectedAttack} Demonstration`}
-          </button>
-
-          {error && <div style={styles.errorBox}>{error}</div>}
-        </div>
-
-        {/* Results Panel */}
-        <div style={styles.card}>
-          <h3 style={styles.cardTitle}>Real-time Detection Telemetry Result</h3>
-
-          {result ? (
-            <div style={styles.resultGroup}>
-              <div style={styles.statusBadge}>
-                <span style={styles.statusDot} />
-                <span>SIMULATION STATUS: {result.status}</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+              <div>
+                <label className="text-[10px] font-mono uppercase tracking-wider block mb-1" style={{ color: 'var(--tx-5)' }}>
+                  Target IP Address
+                </label>
+                <input
+                  type="text"
+                  className="w-full text-xs font-mono px-3 py-2 rounded-lg outline-none transition-colors"
+                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-1)' }}
+                  value={targetIp}
+                  onChange={e => setTargetIp(e.target.value)}
+                />
               </div>
 
-              <div style={styles.resGrid}>
-                <div style={styles.resBox}>
-                  <span style={styles.resLabel}>Packets Generated</span>
-                  <span style={styles.resVal}>{result.packets_generated}</span>
-                </div>
-
-                <div style={styles.resBox}>
-                  <span style={styles.resLabel}>Flows Generated</span>
-                  <span style={styles.resVal}>{result.flows_generated}</span>
-                </div>
-
-                <div style={styles.resBox}>
-                  <span style={styles.resLabel}>Execution Time</span>
-                  <span style={styles.resVal}>{result.detection_time_ms} ms</span>
-                </div>
-              </div>
-
-              <div style={styles.detectionDetails}>
-                <div style={styles.detRow}>
-                  <span style={styles.detLabel}>Stage 1 RandomForest Detection:</span>
-                  <span style={{ ...styles.detVal, color: '#3b82f6' }}>{result.known_attack_result}</span>
-                </div>
-
-                <div style={styles.detRow}>
-                  <span style={styles.detLabel}>Stage 2 Autoencoder Evaluation:</span>
-                  <span style={{ ...styles.detVal, color: '#a855f7' }}>{result.unknown_attack_result}</span>
-                </div>
-              </div>
-
-              <div style={styles.infoNote}>
-                Flow feature vectors were pushed directly into Redis Stream <code>ids:flows</code>.
-                Check the SOC Dashboard and Alerts tab to inspect generated detections!
+              <div>
+                <label className="text-[10px] font-mono uppercase tracking-wider block mb-1" style={{ color: 'var(--tx-5)' }}>
+                  Packet Count (10 – 10,000)
+                </label>
+                <input
+                  type="number"
+                  min={10}
+                  max={10000}
+                  step={10}
+                  className="w-full text-xs font-mono px-3 py-2 rounded-lg outline-none transition-colors"
+                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-1)' }}
+                  value={packetCount}
+                  onChange={e => setPacketCount(Math.max(10, Math.min(10000, Number(e.target.value))))}
+                />
               </div>
             </div>
-          ) : (
-            <div style={styles.emptyState}>
-              Select an attack pattern and click <strong>Run Demonstration</strong> to execute and evaluate detection telemetry.
+
+            <button
+              onClick={handleRunSimulation}
+              disabled={loading || !selectedAttack}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-mono font-bold transition-all disabled:opacity-40"
+              style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)', color: 'var(--accent)' }}
+            >
+              {loading ? (
+                <>
+                  <RefreshCw size={14} className="animate-spin" />
+                  <span>Executing Simulation…</span>
+                </>
+              ) : (
+                <>
+                  <Play size={14} />
+                  <span>Run {selectedAttack} Simulation</span>
+                </>
+              )}
+            </button>
+
+            {error && (
+              <div className="mt-4 p-3 rounded-lg flex items-center gap-2 text-[12px] font-mono"
+                style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }}>
+                <AlertTriangle size={15} />
+                <span>{error}</span>
+              </div>
+            )}
+          </Panel>
+
+          {/* Pipeline Step Display */}
+          <Panel>
+            <SectionHeader title="Detection Pipeline Flow" sub="Redis Stream → Flow Consumer Worker → Stage 1/2 ML" />
+            <div className="flex items-center gap-1 overflow-x-auto pb-2">
+              {PIPELINE_STEPS.map((step, i) => {
+                const isActive = activeStep === i
+                const isPassed = activeStep > i
+                return (
+                  <div key={step} className="flex items-center gap-1 shrink-0">
+                    <div
+                      className="px-2.5 py-1.5 rounded text-[10px] font-mono font-medium border transition-all"
+                      style={isPassed ? {
+                        borderColor: 'var(--low-border)', background: 'var(--low-dim)', color: 'var(--low)'
+                      } : isActive ? {
+                        borderColor: 'var(--accent-border)', background: 'var(--accent-dim)', color: 'var(--accent)'
+                      } : {
+                        borderColor: 'var(--border)', color: 'var(--tx-5)'
+                      }}
+                    >
+                      {step}
+                    </div>
+                    {i < PIPELINE_STEPS.length - 1 && (
+                      <ChevronRight size={12} style={{ color: isPassed ? 'var(--low)' : 'var(--border)' }} />
+                    )}
+                  </div>
+                )
+              })}
             </div>
+          </Panel>
+
+          {/* Real Simulation Results */}
+          {result && (
+            <Panel style={{ border: '2px solid var(--low-border)' }}>
+              <SectionHeader title="Real Simulation Results" sub="Backend execution telemetry output" />
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {[
+                  ['Attack Type', result.attack_type],
+                  ['Packet Count', (result.packet_count_requested ?? result.packets_generated).toLocaleString()],
+                  ['Target IP', result.target_ip || '172.16.0.5'],
+                  ['Packets Generated', result.packets_generated.toLocaleString()],
+                  ['Flows Generated', result.flows_generated.toLocaleString()],
+                  ['Detection Time', `${result.detection_time_ms} ms`],
+                  ['Status', result.status],
+                ].map(([k, v]) => (
+                  <div key={k as string} className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                    <p className="text-[10px] font-mono uppercase tracking-wider mb-1" style={{ color: 'var(--tx-5)' }}>{k}</p>
+                    <p className="text-xs font-mono font-bold" style={{ color: 'var(--tx-1)' }}>{v}</p>
+                  </div>
+                ))}
+
+                {/* Stage 1 Result */}
+                <div className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--crit-border)' }}>
+                  <p className="text-[10px] font-mono uppercase tracking-wider mb-1" style={{ color: 'var(--tx-5)' }}>Stage 1 Result</p>
+                  <p className="text-xs font-mono font-bold" style={{ color: 'var(--crit)' }}>
+                    {result.known_attack_result}
+                  </p>
+                </div>
+
+                {/* Stage 2 Result */}
+                <div className="p-3 rounded-lg" style={{ background: 'var(--surface-2)', border: '1px solid var(--accent-border)' }}>
+                  <p className="text-[10px] font-mono uppercase tracking-wider mb-1" style={{ color: 'var(--tx-5)' }}>Stage 2 Result</p>
+                  <p className="text-xs font-mono font-bold" style={{ color: 'var(--accent)' }}>
+                    {result.unknown_attack_result}
+                  </p>
+                </div>
+              </div>
+            </Panel>
           )}
         </div>
       </div>
     </div>
   )
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  container: { padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' },
-  pageTitle: { fontSize: '20px', fontWeight: 700, color: '#f0f6fc', margin: 0 },
-  pageSubtitle: { fontSize: '12px', color: '#8b949e' },
-  twoCol: { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' },
-  card: { backgroundColor: '#0d1117', border: '1px solid #21262d', borderRadius: '8px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' },
-  cardTitle: { fontSize: '15px', fontWeight: 700, color: '#f0f6fc', margin: 0 },
-  gridAttacks: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
-  atkBox: { border: '1px solid #21262d', borderRadius: '6px', padding: '10px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '4px' },
-  atkHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  atkName: { fontSize: '12px', fontWeight: 700, color: '#f0f6fc' },
-  atkCat: { fontSize: '9px', color: '#38bdf8', fontWeight: 700, textTransform: 'uppercase' },
-  atkDesc: { fontSize: '10px', color: '#8b949e' },
-  formRow: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' },
-  formGroup: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  label: { fontSize: '11px', color: '#8b949e', fontWeight: 600 },
-  input: { backgroundColor: '#161b22', color: '#f0f6fc', border: '1px solid #30363d', borderRadius: '6px', padding: '8px 12px', fontSize: '12px', outline: 'none' },
-  runButton: { backgroundColor: '#059669', color: '#fff', border: 'none', borderRadius: '6px', padding: '10px', fontWeight: 700, fontSize: '13px', cursor: 'pointer' },
-  errorBox: { backgroundColor: '#7f1d1d33', border: '1px solid #ef4444', color: '#fca5a5', padding: '10px', borderRadius: '6px', fontSize: '12px' },
-  resultGroup: { display: 'flex', flexDirection: 'column', gap: '14px' },
-  statusBadge: { backgroundColor: '#064e3b33', border: '1px solid #10b981', color: '#6ee7b7', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' },
-  statusDot: { width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' },
-  resGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' },
-  resBox: { backgroundColor: '#161b22', padding: '10px', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '4px' },
-  resLabel: { fontSize: '10px', color: '#8b949e', textTransform: 'uppercase', fontWeight: 700 },
-  resVal: { fontSize: '18px', fontWeight: 700, color: '#f0f6fc' },
-  detectionDetails: { backgroundColor: '#161b22', padding: '12px', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '8px' },
-  detRow: { display: 'flex', justifyContent: 'space-between', fontSize: '12px' },
-  detLabel: { color: '#8b949e' },
-  detVal: { fontWeight: 700 },
-  infoNote: { backgroundColor: '#1e293b', padding: '10px', borderRadius: '6px', fontSize: '11px', color: '#94a3b8' },
-  emptyState: { color: '#6e7681', fontSize: '13px', textAlign: 'center', padding: '40px 0' },
 }

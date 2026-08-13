@@ -3,9 +3,16 @@ import { useWebSocket } from '../hooks/useWebSocket'
 import apiClient from '../api/client'
 import type { MetricsOverview, TrafficStats, WebSocketMessage } from '../types'
 
+interface ActiveHostItem {
+  ip: string
+  type: string
+  status: string
+}
+
 export default function TrafficPage() {
   const { lastMessage } = useWebSocket<WebSocketMessage>('/ws/traffic')
   const [overview, setOverview] = useState<MetricsOverview | null>(null)
+  const [hosts, setHosts] = useState<ActiveHostItem[]>([])
 
   const trafficStats =
     lastMessage && typeof lastMessage === 'object' && 'type' in lastMessage && lastMessage.type === 'traffic_stats'
@@ -15,12 +22,50 @@ export default function TrafficPage() {
   useEffect(() => {
     async function fetchMetrics() {
       try {
-        const res = await apiClient.get<MetricsOverview>('/metrics/overview')
-        setOverview(res.data)
+        const [overviewRes, analyticsRes] = await Promise.allSettled([
+          apiClient.get<MetricsOverview>('/metrics/overview'),
+          apiClient.get<any>('/analytics'),
+        ])
+
+        if (overviewRes.status === 'fulfilled') {
+          setOverview(overviewRes.value.data)
+        }
+
+        if (analyticsRes.status === 'fulfilled') {
+          const data = analyticsRes.value.data
+          const hostList: ActiveHostItem[] = []
+
+          if (Array.isArray(data?.top_sources)) {
+            data.top_sources.forEach((s: any) => {
+              if (s.ip && !hostList.some(h => h.ip === s.ip)) {
+                hostList.push({
+                  ip: s.ip,
+                  type: s.country || (s.ip.startsWith('192.168.') || s.ip.startsWith('10.') || s.ip.startsWith('172.16.') ? 'Internal Host' : 'Threat Source'),
+                  status: 'Active',
+                })
+              }
+            })
+          }
+
+          if (Array.isArray(data?.top_destinations)) {
+            data.top_destinations.forEach((d: any) => {
+              if (d.ip && !hostList.some(h => h.ip === d.ip)) {
+                hostList.push({
+                  ip: d.ip,
+                  type: d.label || 'Target Gateway',
+                  status: 'Active',
+                })
+              }
+            })
+          }
+
+          setHosts(hostList)
+        }
       } catch (e) {
-        console.warn('Failed to fetch overview traffic metrics:', e)
+        console.warn('Failed to fetch live traffic metrics:', e)
       }
     }
+
     fetchMetrics()
     const timer = setInterval(fetchMetrics, 5000)
     return () => clearInterval(timer)
@@ -90,28 +135,33 @@ export default function TrafficPage() {
           </div>
         </div>
 
-        {/* Top Source IPs */}
+        {/* Dynamic Active Network Hosts */}
         <div style={styles.card}>
           <h3 style={styles.sectionTitle}>Active Network Hosts</h3>
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Source IP</th>
+                <th style={styles.th}>Host IP</th>
                 <th style={styles.th}>Type</th>
                 <th style={styles.th}>Status</th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td style={styles.tdIp}>192.168.10.50</td>
-                <td style={styles.td}>Internal Host</td>
-                <td style={styles.tdActive}>Active</td>
-              </tr>
-              <tr>
-                <td style={styles.tdIp}>172.16.0.5</td>
-                <td style={styles.td}>Target Gateway</td>
-                <td style={styles.tdActive}>Active</td>
-              </tr>
+              {hosts.length > 0 ? (
+                hosts.map((host) => (
+                  <tr key={host.ip}>
+                    <td style={styles.tdIp}>{host.ip}</td>
+                    <td style={styles.td}>{host.type}</td>
+                    <td style={styles.tdActive}>{host.status}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={3} style={{ textAlign: 'center', color: '#6e7681', padding: '20px' }}>
+                    No active network hosts recorded
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

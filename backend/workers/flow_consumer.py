@@ -45,6 +45,7 @@ from feature_extraction.extractor import extract_features
 from ml.pipeline import DetectionPipeline
 from workers.alert_broadcaster import broadcast_alert
 from api.dependencies import get_redis_url
+from honeypot.enrichment import enrich_alert_with_honeypot
 
 logger = logging.getLogger(__name__)
 

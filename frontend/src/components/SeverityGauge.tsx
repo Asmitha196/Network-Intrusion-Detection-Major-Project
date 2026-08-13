@@ -77,8 +77,8 @@ export default function SeverityGauge({ alerts }: Props) {
             />
             <Tooltip
               contentStyle={{ background: '#1e2230', border: '1px solid #2d3448', fontSize: 12 }}
-              formatter={(value: number, name: string) => [
-                `${value} (${((value / total) * 100).toFixed(0)}%)`,
+              formatter={(value: any, name: any) => [
+                `${value} (${((Number(value) / total) * 100).toFixed(0)}%)`,
                 name,
               ]}
             />
