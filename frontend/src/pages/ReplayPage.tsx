@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { HardDriveUpload, RefreshCw, CheckCircle2, AlertTriangle, Play, Clock } from 'lucide-react'
+import { HardDriveUpload, RefreshCw, CheckCircle2, AlertTriangle, Play, Clock, Download } from 'lucide-react'
 import apiClient from '../api/client'
 import { StatCard, SectionHeader, Panel, Table, Tr, Td, EmptyState } from '../components/ui'
 
@@ -212,8 +212,53 @@ export default function ReplayPage() {
           </div>
         </div>
 
+        {/* Downloadable Sample PCAPs */}
+        <div className="mt-4 pt-4 border-t border-[var(--border)]">
+          <p className="text-xs font-mono font-semibold mb-2" style={{ color: 'var(--tx-2)' }}>
+            Need a test capture? Download pre-generated sample PCAP files:
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="http://localhost:8000/ingest/download/sample.pcap"
+              download="sample.pcap"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-mono transition-all hover:brightness-125"
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--accent)' }}
+            >
+              <Download size={12} />
+              <span>Full Sample Capture (9.7 KB)</span>
+            </a>
+            <a
+              href="http://localhost:8000/ingest/download/sample_network_traffic.pcap"
+              download="sample_network_traffic.pcap"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-mono transition-all hover:brightness-125"
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-2)' }}
+            >
+              <Download size={12} />
+              <span>Normal Traffic (677 B)</span>
+            </a>
+            <a
+              href="http://localhost:8000/ingest/download/sample_portscan_attack.pcap"
+              download="sample_portscan_attack.pcap"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-mono transition-all hover:brightness-125"
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-2)' }}
+            >
+              <Download size={12} />
+              <span>PortScan Attack (2.1 KB)</span>
+            </a>
+            <a
+              href="http://localhost:8000/ingest/download/sample_ddos_attack.pcap"
+              download="sample_ddos_attack.pcap"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-mono transition-all hover:brightness-125"
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-2)' }}
+            >
+              <Download size={12} />
+              <span>DDoS Attack (7.0 KB)</span>
+            </a>
+          </div>
+        </div>
+
         {error && (
-          <div className="p-3.5 rounded-lg flex items-center gap-2 text-[12px] font-mono"
+          <div className="p-3.5 rounded-lg flex items-center gap-2 text-[12px] font-mono mt-3"
             style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }}>
             <AlertTriangle size={15} />
             <span>{error}</span>

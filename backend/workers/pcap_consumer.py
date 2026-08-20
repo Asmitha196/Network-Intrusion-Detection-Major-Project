@@ -55,7 +55,7 @@ async def _init_consumer_group(redis: aioredis.Redis) -> None:
 async def _process_pcap_job(redis: aioredis.Redis, message_id: str, fields: dict[str, str]) -> None:
     """Read PCAP job payload, run flow builder extraction, and push flows to ids:flows."""
     job_id = fields.get("job_id", "unknown")
-    filepath = fields.get("filepath", "")
+    filepath = fields.get("file_path", fields.get("filepath", ""))
 
     logger.info("Processing PCAP job %s for file: %s", job_id, filepath)
 

@@ -16,6 +16,7 @@ from typing import Any
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi.responses import FileResponse
 
 from api.dependencies import get_redis
 from api.schemas.flow import FlowFeatures
@@ -157,3 +158,45 @@ async def get_pcap_job_status(
         "completed_at": job_data.get("completed_at", ""),
         "failed_at": job_data.get("failed_at", ""),
     }
+
+
+@router.get("/samples", summary="List downloadable sample PCAP files")
+async def list_sample_pcaps() -> dict[str, Any]:
+    """Return a list of available downloadable sample PCAP files for testing."""
+    data_dir = Path("../data")
+    if not data_dir.exists():
+        data_dir = Path("data")
+
+    samples = []
+    for f in ["sample.pcap", "sample_network_traffic.pcap", "sample_portscan_attack.pcap", "sample_ddos_attack.pcap"]:
+        path = data_dir / f
+        if path.exists():
+            samples.append({
+                "name": f,
+                "size_bytes": path.stat().st_size,
+                "download_url": f"/ingest/download/{f}",
+            })
+
+    return {"samples": samples}
+
+
+@router.get("/download/{filename}", summary="Download a sample PCAP file")
+async def download_pcap(filename: str):
+    """Download a specified .pcap packet capture file."""
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    data_dir = Path("../data")
+    file_path = data_dir / filename
+    if not file_path.exists():
+        file_path = Path("data") / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"PCAP file '{filename}' not found.")
+
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type="application/vnd.tcpdump.pcap",
+    )
+
