@@ -180,12 +180,14 @@ async def ws_traffic(websocket: WebSocket) -> None:
                 stats = {
                     "type": "traffic_stats",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "total_flows_processed": total_flows,
-                    "total_alerts_generated": total_alerts,
                     "status": "active",
                     **engine_status,
+                    "total_flows_processed": total_flows if total_flows > 0 else engine_status.get("total_flows_processed", 0),
+                    "total_alerts_generated": total_alerts,
                 }
                 await websocket.send_json(stats)
+            except (WebSocketDisconnect, RuntimeError):
+                break
             except Exception as e:
                 logger.warning("Error fetching traffic stats for WS: %s", e)
 

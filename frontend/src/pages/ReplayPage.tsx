@@ -148,14 +148,50 @@ export default function ReplayPage() {
   }
 
   return (
-    <div className="space-y-5 max-w-4xl select-none">
+    <div className="space-y-4 max-w-5xl select-none">
+      {/* Visual Replay Pipeline Architecture Banner */}
+      <Panel noPad className="p-3">
+        <div className="flex items-center justify-between gap-4 mb-2">
+          <span className="text-[10px] font-mono font-bold uppercase tracking-widest" style={{ color: 'var(--tx-4)' }}>
+            PCAP Ingestion & Replay Architecture
+          </span>
+          <span className="text-[10px] font-mono" style={{ color: 'var(--accent)' }}>
+            Full 76-Feature Reconstitution
+          </span>
+        </div>
+        <div className="flex items-center flex-wrap gap-2">
+          {[
+            'PCAP File Upload',
+            'Packet Parsing (Npcap/Scapy)',
+            'Flow Reconstruction (FlowBuilder)',
+            '76 Feature Extraction',
+            'Redis Stream (ids:flows)',
+            'Stage 1 & 2 ML Inference',
+          ].map((step, idx, arr) => (
+            <div key={idx} className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10.5px] font-mono font-semibold"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-2)' }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+                {step}
+              </div>
+              {idx < arr.length - 1 && (
+                <span className="text-[11px] font-mono" style={{ color: 'var(--accent)', opacity: 0.6 }}>→</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </Panel>
+
       {/* ── STAT CARDS ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="PCAP Replay Status" value={jobStatus?.status ? jobStatus.status.toUpperCase() : 'READY'} sub="Capture ingestion engine" accent />
         <StatCard label="Current Job ID"      value={activeJobId ? activeJobId.slice(0, 8) + '...' : 'NONE'} sub="Active job session" />
         <StatCard label="Extracted Flows"    value={jobStatus?.total_flows?.toLocaleString() ?? 0} sub="Pushed to Redis Stream" accent={(jobStatus?.total_flows ?? 0) > 0} />
         <StatCard label="Replay Jobs Logged" value={jobsHistory.length} sub="Historical capture files" />
       </div>
+
 
       {/* ── PCAP UPLOADER PANEL ── */}
       <Panel>

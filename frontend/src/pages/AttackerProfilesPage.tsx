@@ -116,6 +116,64 @@ function AttackerDetailDrawer({ sourceIp, onClose }: { sourceIp: string; onClose
               ))}
             </div>
 
+            {/* RISK SCORE EXPLANATION & EVIDENCE (PHASE 4) */}
+            <div className="p-4 rounded-xl space-y-3 text-[11px] font-mono"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] uppercase font-bold tracking-wider" style={{ color: 'var(--accent)' }}>
+                  Risk Score Evidence & Factor Breakdown (Backend Risk Engine)
+                </p>
+                <span className="font-bold text-amber-400">Score: {profile.risk_score ?? 0}</span>
+              </div>
+              <ul className="space-y-1.5" style={{ color: 'var(--tx-2)' }}>
+                <li className="flex items-center justify-between">
+                  <span>• Critical / High Alerts:</span>
+                  <span className="font-semibold">{profile.critical_alerts ?? 0} Critical, {profile.high_alerts ?? 0} High</span>
+                </li>
+                <li className="flex items-center justify-between">
+                  <span>• Total Security Alerts:</span>
+                  <span className="font-semibold">{profile.total_alerts ?? 0} alerts</span>
+                </li>
+                <li className="flex items-center justify-between">
+                  <span>• Honeypot Decoy Interactions:</span>
+                  <span className="font-semibold">{profile.honeypot_interactions ?? 0} hits</span>
+                </li>
+                <li className="flex items-center justify-between">
+                  <span>• Attack Category Diversity:</span>
+                  <span className="font-semibold">{profile.attack_types?.length ?? 0} distinct categories</span>
+                </li>
+                {profile.risk_breakdown && Object.keys(profile.risk_breakdown).length > 0 && (
+                  <li className="pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                    <p className="text-[10px] uppercase text-cyan-400 mb-1">Signal Contribution Points:</p>
+                    <div className="grid grid-cols-2 gap-2 text-[10px]" style={{ color: 'var(--tx-4)' }}>
+                      {Object.entries(profile.risk_breakdown).map(([factor, pts]) => (
+                        <div key={factor} className="flex justify-between">
+                          <span className="capitalize">{factor.replace(/_/g, ' ')}:</span>
+                          <span className="font-bold text-cyan-400">+{pts} pts</span>
+                        </div>
+                      ))}
+                    </div>
+                  </li>
+                )}
+              </ul>
+            </div>
+
+            {/* CONNECTED SOC NAVIGATION ACTIONS (PHASE 3) */}
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <a href="/alerts" className="px-3 py-1.5 rounded-lg text-[11px] font-mono font-semibold"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
+                View IP Alerts
+              </a>
+              <a href="/incidents" className="px-3 py-1.5 rounded-lg text-[11px] font-mono font-semibold"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
+                View IP Incidents
+              </a>
+              <a href="/incident-response" className="px-3 py-1.5 rounded-lg text-[11px] font-mono font-semibold"
+                style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }}>
+                Respond & Block IP
+              </a>
+            </div>
+
             {/* Chronological Timeline */}
             <div>
               <div className="flex items-center gap-2 mb-3">
@@ -205,6 +263,39 @@ export default function AttackerProfilesPage() {
 
   return (
     <div className="space-y-4 select-none">
+      {/* Visual Threat Progression Architecture Banner */}
+      <Panel noPad className="p-3">
+        <div className="flex items-center justify-between gap-4 mb-2">
+          <span className="text-[10px] font-mono font-bold uppercase tracking-widest" style={{ color: 'var(--tx-4)' }}>
+            Threat Actor Progression Lifecycle
+          </span>
+          <span className="text-[10px] font-mono" style={{ color: 'var(--accent)' }}>
+            Automated IP Profiling
+          </span>
+        </div>
+        <div className="flex items-center flex-wrap gap-2">
+          {[
+            'Reconnaissance Probe',
+            'Port Scan / Service Probe',
+            'Honeypot Decoy Interaction',
+            'Stage 1 / 2 ML Detection',
+            'High-Risk Actor Profiled',
+          ].map((step, idx, arr) => (
+            <div key={idx} className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10.5px] font-mono font-semibold"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-2)' }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: idx === arr.length - 1 ? 'var(--crit)' : 'var(--accent)' }} />
+                {step}
+              </div>
+              {idx < arr.length - 1 && (
+                <span className="text-[11px] font-mono" style={{ color: 'var(--accent)', opacity: 0.6 }}>→</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </Panel>
 
       {/* ── STAT CARDS ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -213,6 +304,7 @@ export default function AttackerProfilesPage() {
         <StatCard label="Total Detections"   value={totalAttacksCount} sub="Cross-stage alerts" accent />
         <StatCard label="Decoy Interactions" value={profiles.reduce((acc, p) => acc + (p.honeypot_interactions ?? 0), 0)} sub="Honeypot hits" />
       </div>
+
 
       {/* ── ATTACKER PROFILES TABLE ── */}
       <Panel>

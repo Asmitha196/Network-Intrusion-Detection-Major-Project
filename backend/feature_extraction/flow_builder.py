@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import time
 import logging
+import threading
 from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
@@ -284,21 +285,26 @@ class FlowBucket:
 class FlowBuilder:
     """
     Accumulates network packets and groups them into bidirectional flows.
+    Thread-safe implementation protected by threading.Lock.
     """
 
     def __init__(self) -> None:
         self._active_flows: Dict[Tuple[str, str, int, int, str], FlowBucket] = {}
+        self._lock = threading.Lock()
 
     @property
     def active_flows(self) -> Dict[Tuple[str, str, int, int, str], FlowBucket]:
-        return self._active_flows
+        with self._lock:
+            return dict(self._active_flows)
 
     @property
     def active_flow_count(self) -> int:
-        return len(self._active_flows)
+        with self._lock:
+            return len(self._active_flows)
 
     def get_active_flow_count(self) -> int:
-        return len(self._active_flows)
+        with self._lock:
+            return len(self._active_flows)
 
     def add_packet(self, packet: Any) -> Optional[Dict[str, Any]]:
         """
@@ -362,14 +368,15 @@ class FlowBuilder:
             fwd_key = (src_ip, dst_ip, src_port, dst_port, proto)
             bwd_key = (dst_ip, src_ip, dst_port, src_port, proto)
 
-            if fwd_key in self._active_flows:
-                self._active_flows[fwd_key].add_packet(pkt_meta, "fwd")
-            elif bwd_key in self._active_flows:
-                self._active_flows[bwd_key].add_packet(pkt_meta, "bwd")
-            else:
-                bucket = FlowBucket(fwd_key, ts)
-                bucket.add_packet(pkt_meta, "fwd")
-                self._active_flows[fwd_key] = bucket
+            with self._lock:
+                if fwd_key in self._active_flows:
+                    self._active_flows[fwd_key].add_packet(pkt_meta, "fwd")
+                elif bwd_key in self._active_flows:
+                    self._active_flows[bwd_key].add_packet(pkt_meta, "bwd")
+                else:
+                    bucket = FlowBucket(fwd_key, ts)
+                    bucket.add_packet(pkt_meta, "fwd")
+                    self._active_flows[fwd_key] = bucket
 
         except Exception as e:
             logger.debug("Failed to process packet in FlowBuilder: %s", e)
@@ -382,18 +389,21 @@ class FlowBuilder:
 
     def get_completed_flows(self, force_all: bool = False) -> List[Dict[str, Any]]:
         """
-        Harvest completed or timed-out flows from active flow table.
+        Harvest completed or timed-out flows from active flow table in a thread-safe manner.
         """
         current_ts = time.time()
         completed: List[Dict[str, Any]] = []
-        keys_to_remove: List[Tuple[str, str, int, int, str]] = []
+        expired_buckets: List[FlowBucket] = []
 
-        for key, bucket in self._active_flows.items():
-            if force_all or bucket.is_expired(current_ts):
-                completed.append(bucket.to_feature_dict())
-                keys_to_remove.append(key)
+        with self._lock:
+            keys_to_remove = [
+                key for key, bucket in self._active_flows.items()
+                if force_all or bucket.is_expired(current_ts)
+            ]
+            for k in keys_to_remove:
+                expired_buckets.append(self._active_flows.pop(k))
 
-        for k in keys_to_remove:
-            del self._active_flows[k]
+        for bucket in expired_buckets:
+            completed.append(bucket.to_feature_dict())
 
         return completed

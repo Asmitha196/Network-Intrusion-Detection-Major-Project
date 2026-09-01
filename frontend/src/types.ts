@@ -92,6 +92,7 @@ export interface MetricsOverview {
   }
   protocols: Array<{ protocol: string; count: number }>
   total_alerts: number
+  total_flows?: number
 }
 
 export interface TimelineItem {
@@ -375,6 +376,9 @@ export interface AttackerProfile {
   isp?: string
   associated_alerts?: string[]
   threat_intelligence?: ThreatIntelData
+  risk_breakdown?: Record<string, number>
+  critical_alerts?: number
+  high_alerts?: number
 }
 
 export interface CorrelatedIncident {

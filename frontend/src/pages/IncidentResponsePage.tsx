@@ -170,6 +170,39 @@ export default function IncidentResponsePage() {
 
   return (
     <div className="space-y-4 select-none">
+      {/* Visual Human-in-the-Loop Architecture Banner */}
+      <Panel noPad className="p-3">
+        <div className="flex items-center justify-between gap-4 mb-2">
+          <span className="text-[10px] font-mono font-bold uppercase tracking-widest" style={{ color: 'var(--tx-4)' }}>
+            Human-in-the-Loop Response Workflow
+          </span>
+          <span className="text-[10px] font-mono font-bold text-amber-400">
+            Analyst Authorization Required
+          </span>
+        </div>
+        <div className="flex items-center flex-wrap gap-2">
+          {[
+            'Real-Time Detection',
+            'Risk & Evidence Scoring',
+            'Containment Recommendation',
+            'Human Analyst Approval',
+            'Firewall Rule Execution',
+          ].map((step, idx, arr) => (
+            <div key={idx} className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10.5px] font-mono font-semibold"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-2)' }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: idx === 3 ? 'var(--high)' : idx === 4 ? 'var(--crit)' : 'var(--accent)' }} />
+                {step}
+              </div>
+              {idx < arr.length - 1 && (
+                <span className="text-[11px] font-mono" style={{ color: 'var(--accent)', opacity: 0.6 }}>→</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </Panel>
 
       {/* ── STAT CARDS ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -178,6 +211,7 @@ export default function IncidentResponsePage() {
         <StatCard label="Whitelisted IPs"          value={activeRules?.whitelist?.length ?? 0} sub="Trusted LAN & loopback" />
         <StatCard label="Blacklisted IPs"          value={activeRules?.blacklist?.length ?? 0} sub="Denied threat actors" critical={(activeRules?.blacklist?.length ?? 0) > 0} />
       </div>
+
 
       {/* ── RECOMMENDATIONS TABLE ── */}
       <Panel>

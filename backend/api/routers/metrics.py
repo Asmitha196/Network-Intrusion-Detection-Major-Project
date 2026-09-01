@@ -95,6 +95,11 @@ async def get_metrics_overview(
     benign_count = sum(item["count"] for item in top_attacks if item["attack_type"] == "BENIGN")
     malicious_count = max(0, counts_row["total_alerts"] - benign_count)
 
+    # 4. Total Processed Flow Records
+    flow_count_sql = text("SELECT COUNT(*) AS total_flows FROM flow_records")
+    res_flow_count = await db.execute(flow_count_sql)
+    total_flows = res_flow_count.scalar_one() or 0
+
     return {
         "today_alerts": counts_row["today_alerts"],
         "critical_alerts": counts_row["critical_alerts"],
@@ -108,6 +113,7 @@ async def get_metrics_overview(
         },
         "protocols": protocols,
         "total_alerts": counts_row["total_alerts"],
+        "total_flows": total_flows,
     }
 
 

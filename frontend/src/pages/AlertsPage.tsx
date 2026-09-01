@@ -3,7 +3,7 @@ import { X, ChevronUp, ChevronDown, Trash2, Search, Filter, RefreshCw, ChevronLe
 import apiClient from '../api/client'
 import { SeverityBadge, Panel, SectionHeader, IP, Table, Tr, Td, EmptyState, LoadingState, Severity } from '../components/ui'
 import { useWebSocket } from '../hooks/useWebSocket'
-import type { Alert, AlertListResponse, ShapExplanation, WebSocketMessage } from '../types'
+import type { Alert, AlertListResponse, ShapExplanation, WebSocketMessage, AttackerProfile, CorrelatedIncident } from '../types'
 
 const SEVERITY_MAP: Record<string, Severity> = {
   critical: 'CRITICAL',
@@ -46,13 +46,39 @@ function AlertDrawer({ alertId, onClose, onDelete }: { alertId: string; onClose:
   const [loading, setLoading] = useState<boolean>(true)
   const [deleting, setDeleting] = useState<boolean>(false)
 
+  // Related SOC telemetry state
+  const [attackerProfile, setAttackerProfile] = useState<AttackerProfile | null>(null)
+  const [honeypotCorrelation, setHoneypotCorrelation] = useState<any | null>(null)
+  const [relatedIncident, setRelatedIncident] = useState<CorrelatedIncident | null>(null)
+  const [relatedLoading, setRelatedLoading] = useState<boolean>(false)
+
   useEffect(() => {
     let isMounted = true
     setLoading(true)
 
     apiClient.get<Alert>(`/alerts/${alertId}`)
       .then(res => {
-        if (isMounted) setAlert(res.data)
+        if (!isMounted) return
+        const a = res.data
+        setAlert(a)
+
+        if (a?.src_ip && a.src_ip !== '0.0.0.0') {
+          setRelatedLoading(true)
+          Promise.allSettled([
+            apiClient.get<AttackerProfile>(`/attackers/${encodeURIComponent(a.src_ip)}`),
+            apiClient.get<any>(`/honeypot/ip-correlation/${encodeURIComponent(a.src_ip)}`),
+            apiClient.get<CorrelatedIncident[]>(`/incidents?source_ip=${encodeURIComponent(a.src_ip)}`),
+          ]).then(([profRes, hpRes, incRes]) => {
+            if (!isMounted) return
+            if (profRes.status === 'fulfilled') setAttackerProfile(profRes.value.data)
+            if (hpRes.status === 'fulfilled') setHoneypotCorrelation(hpRes.value.data)
+            if (incRes.status === 'fulfilled' && Array.isArray(incRes.value.data) && incRes.value.data.length > 0) {
+              setRelatedIncident(incRes.value.data[0])
+            }
+          }).finally(() => {
+            if (isMounted) setRelatedLoading(false)
+          })
+        }
       })
       .catch(err => {
         console.error(`Failed to fetch detail for alert ${alertId}:`, err)
@@ -86,7 +112,7 @@ function AlertDrawer({ alertId, onClose, onDelete }: { alertId: string; onClose:
   return (
     <div className="fixed inset-0 z-40 flex select-none">
       <div className="flex-1" style={{ background: 'rgba(6,9,14,0.6)', backdropFilter: 'blur(4px)' }} onClick={onClose} />
-      <aside className="w-full max-w-md overflow-y-auto slide-in"
+      <aside className="w-full max-w-lg md:max-w-xl overflow-y-auto slide-in"
         style={{ background: 'var(--surface-2)', borderLeft: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
           <div>
@@ -135,12 +161,12 @@ function AlertDrawer({ alertId, onClose, onDelete }: { alertId: string; onClose:
               <div>
                 <p className="text-[10px] font-mono uppercase tracking-wider mb-0.5" style={{ color: 'var(--tx-5)' }}>Source IP & Port</p>
                 <IP>{alert.src_ip || 'N/A'}</IP>
-                {alert.src_port && <span className="text-[11px] font-mono ml-1" style={{ color: 'var(--tx-4)' }}>:{alert.src_port}</span>}
+                {alert.src_port ? <span className="text-[11px] font-mono ml-1" style={{ color: 'var(--tx-4)' }}>:{alert.src_port}</span> : null}
               </div>
               <div>
                 <p className="text-[10px] font-mono uppercase tracking-wider mb-0.5" style={{ color: 'var(--tx-5)' }}>Dest IP & Port</p>
                 <p className="text-[12px] font-mono" style={{ color: 'var(--tx-2)' }}>{alert.dst_ip || 'N/A'}</p>
-                {alert.dst_port && <span className="text-[11px] font-mono ml-1" style={{ color: 'var(--tx-4)' }}>:{alert.dst_port}</span>}
+                {alert.dst_port ? <span className="text-[11px] font-mono ml-1" style={{ color: 'var(--tx-4)' }}>:{alert.dst_port}</span> : null}
               </div>
             </div>
 
@@ -204,6 +230,70 @@ function AlertDrawer({ alertId, onClose, onDelete }: { alertId: string; onClose:
                 No SHAP explanation features attached to this alert.
               </div>
             )}
+
+            {/* REAL SOC RELATED CONTEXT & EVIDENCE (PHASE 2 & 3) */}
+            <div className="pt-4 space-y-3" style={{ borderTop: '1px solid var(--border)' }}>
+              <p className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--tx-5)' }}>
+                Cross-SOC Evidence & Related Context
+              </p>
+
+              {relatedLoading ? (
+                <p className="text-[11px] font-mono text-cyan-400 animate-pulse">Querying SOC database records for {alert.src_ip}...</p>
+              ) : (
+                <div className="space-y-2.5 text-[11px] font-mono">
+                  {/* Attacker Profile Context */}
+                  <div className="p-3 rounded-lg flex items-center justify-between" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                    <div>
+                      <p className="text-[10px] uppercase font-bold" style={{ color: 'var(--tx-4)' }}>Attacker Profile</p>
+                      {attackerProfile ? (
+                        <p style={{ color: 'var(--tx-1)' }}>
+                          Risk Score: <span className="font-bold text-amber-400">{attackerProfile.risk_score ?? 'N/A'}</span> | Total Alerts: {attackerProfile.total_alerts ?? 0}
+                        </p>
+                      ) : (
+                        <p style={{ color: 'var(--tx-5)' }}>Unavailable (Clean / Unprofiled Host)</p>
+                      )}
+                    </div>
+                    {attackerProfile && (
+                      <a href="/attackers" className="text-[10px] underline font-bold" style={{ color: 'var(--accent)' }}>View Profile</a>
+                    )}
+                  </div>
+
+                  {/* Honeypot Decoy Activity */}
+                  <div className="p-3 rounded-lg flex items-center justify-between" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                    <div>
+                      <p className="text-[10px] uppercase font-bold" style={{ color: 'var(--tx-4)' }}>Honeypot Decoy Activity</p>
+                      {honeypotCorrelation && honeypotCorrelation.total_honeypot_hits > 0 ? (
+                        <p style={{ color: 'var(--crit)' }}>
+                          {honeypotCorrelation.total_honeypot_hits} decoy interaction(s) recorded (Suspicion: {honeypotCorrelation.suspicion_level})
+                        </p>
+                      ) : (
+                        <p style={{ color: 'var(--tx-5)' }}>Unavailable (No honeypot interactions)</p>
+                      )}
+                    </div>
+                    {honeypotCorrelation && honeypotCorrelation.total_honeypot_hits > 0 && (
+                      <a href="/honeypot" className="text-[10px] underline font-bold" style={{ color: 'var(--accent)' }}>View Honeypot</a>
+                    )}
+                  </div>
+
+                  {/* Related Correlated Incident */}
+                  <div className="p-3 rounded-lg flex items-center justify-between" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                    <div>
+                      <p className="text-[10px] uppercase font-bold" style={{ color: 'var(--tx-4)' }}>Correlated Incident</p>
+                      {relatedIncident ? (
+                        <p style={{ color: 'var(--tx-1)' }}>
+                          Status: <span className="font-bold text-amber-400">{relatedIncident.status}</span> | Risk: {relatedIncident.risk_score}
+                        </p>
+                      ) : (
+                        <p style={{ color: 'var(--tx-5)' }}>Unavailable (No correlated incident)</p>
+                      )}
+                    </div>
+                    {relatedIncident && (
+                      <a href="/incidents" className="text-[10px] underline font-bold" style={{ color: 'var(--accent)' }}>View Incident</a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <EmptyState message="Alert details not found" />

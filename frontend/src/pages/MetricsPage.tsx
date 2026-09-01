@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import AttackTimeline from '../components/AttackTimeline'
 import AttackDistribution from '../components/AttackDistribution'
 import apiClient from '../api/client'
+import { StatCard, Panel, SectionHeader } from '../components/ui'
 import type { MetricsOverview, TimelineItem, TimelineResponse } from '../types'
 
 export default function MetricsPage() {
@@ -19,12 +20,13 @@ export default function MetricsPage() {
 
         const startTs = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000).toISOString()
 
-        const [overviewRes, timelineRes] = await Promise.all([
+        const [overviewRes, timelineRes] = await Promise.allSettled([
           apiClient.get<MetricsOverview>('/metrics/overview'),
           apiClient.get<TimelineResponse>(`/metrics/timeline?start_ts=${encodeURIComponent(startTs)}&interval=${interval}`),
         ])
-        setOverview(overviewRes.data)
-        setTimeline(timelineRes.data.timeline || [])
+
+        if (overviewRes.status === 'fulfilled') setOverview(overviewRes.value.data)
+        if (timelineRes.status === 'fulfilled') setTimeline(timelineRes.value.data.timeline || [])
       } catch (e) {
         console.warn('Failed to fetch metrics:', e)
       }
@@ -33,36 +35,17 @@ export default function MetricsPage() {
   }, [interval])
 
   return (
-    <div style={styles.container}>
-      <div>
-        <h2 style={styles.pageTitle}>Security Metrics & Analytics</h2>
-        <span style={styles.pageSubtitle}>
-          Deep-dive attack trends, TimescaleDB time-series aggregations, and severity breakdown
-        </span>
-      </div>
-
+    <div className="space-y-4 select-none">
       {/* Overview Stat Cards */}
-      <div style={styles.statsGrid}>
-        <div style={styles.card}>
-          <span style={styles.label}>Today's Incidents</span>
-          <div style={styles.val}>{overview?.today_alerts ?? 0}</div>
-        </div>
-        <div style={styles.card}>
-          <span style={styles.label}>Critical Threats</span>
-          <div style={{ ...styles.val, color: '#ef4444' }}>{overview?.critical_alerts ?? 0}</div>
-        </div>
-        <div style={styles.card}>
-          <span style={styles.label}>High Threats</span>
-          <div style={{ ...styles.val, color: '#f97316' }}>{overview?.high_alerts ?? 0}</div>
-        </div>
-        <div style={styles.card}>
-          <span style={styles.label}>Medium Threats</span>
-          <div style={{ ...styles.val, color: '#f59e0b' }}>{overview?.medium_alerts ?? 0}</div>
-        </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Today's Incidents" value={overview?.today_alerts ?? 0} sub="24-hour total events" accent />
+        <StatCard label="Critical Threats"  value={overview?.critical_alerts ?? 0} sub="High priority alerts" critical={(overview?.critical_alerts ?? 0) > 0} />
+        <StatCard label="High Threats"      value={overview?.high_alerts ?? 0}     sub="Elevated risk alerts" />
+        <StatCard label="Medium Threats"    value={overview?.medium_alerts ?? 0}   sub="Triage tier alerts" />
       </div>
 
       {/* Main Charts */}
-      <div style={styles.chartCol}>
+      <div className="w-full">
         <AttackTimeline
           timeline={timeline}
           interval={interval}
@@ -70,104 +53,31 @@ export default function MetricsPage() {
         />
       </div>
 
-      <div style={styles.twoCol}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <AttackDistribution overview={overview} />
 
-        <div style={styles.card}>
-          <h3 style={styles.cardTitle}>Benign vs Malicious Flow Ratio</h3>
-          <div style={styles.ratioBox}>
-            <div style={styles.ratioItem}>
-              <span style={styles.ratioLabel}>Benign Flows</span>
-              <span style={{ ...styles.ratioVal, color: '#10b981' }}>
-                {overview?.benign_vs_malicious.benign ?? 0}
+        <Panel>
+          <SectionHeader title="Benign vs Malicious Flow Ratio" sub="Ingress classification split" />
+          <div className="flex items-center justify-around py-8">
+            <div className="flex flex-col items-center gap-1.5">
+              <span className="text-[11px] font-mono uppercase tracking-wider" style={{ color: 'var(--tx-4)' }}>Benign Flows</span>
+              <span className="text-3xl font-mono font-bold" style={{ color: 'var(--low)' }}>
+                {overview?.benign_vs_malicious?.benign?.toLocaleString() ?? 0}
               </span>
             </div>
 
-            <div style={styles.ratioItem}>
-              <span style={styles.ratioLabel}>Malicious Threats</span>
-              <span style={{ ...styles.ratioVal, color: '#ef4444' }}>
-                {overview?.benign_vs_malicious.malicious ?? 0}
+            <div className="h-12 w-px" style={{ background: 'var(--border)' }} />
+
+            <div className="flex flex-col items-center gap-1.5">
+              <span className="text-[11px] font-mono uppercase tracking-wider" style={{ color: 'var(--tx-4)' }}>Malicious Threats</span>
+              <span className="text-3xl font-mono font-bold" style={{ color: 'var(--crit)' }}>
+                {overview?.benign_vs_malicious?.malicious?.toLocaleString() ?? 0}
               </span>
             </div>
           </div>
-        </div>
+        </Panel>
       </div>
     </div>
   )
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    padding: '24px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '20px',
-  },
-  pageTitle: {
-    fontSize: '20px',
-    fontWeight: 700,
-    color: '#f0f6fc',
-    margin: 0,
-  },
-  pageSubtitle: {
-    fontSize: '12px',
-    color: '#8b949e',
-  },
-  statsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-    gap: '12px',
-  },
-  card: {
-    backgroundColor: '#0d1117',
-    border: '1px solid #21262d',
-    borderRadius: '8px',
-    padding: '16px 20px',
-  },
-  label: {
-    fontSize: '11px',
-    color: '#8b949e',
-    textTransform: 'uppercase',
-    fontWeight: 600,
-  },
-  val: {
-    fontSize: '24px',
-    fontWeight: 700,
-    color: '#f0f6fc',
-    marginTop: '4px',
-  },
-  chartCol: {
-    width: '100%',
-  },
-  twoCol: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '20px',
-  },
-  cardTitle: {
-    margin: 0,
-    fontSize: '15px',
-    fontWeight: 700,
-    color: '#f0f6fc',
-    marginBottom: '16px',
-  },
-  ratioBox: {
-    display: 'flex',
-    justifyContent: 'space-around',
-    padding: '30px 10px',
-  },
-  ratioItem: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  ratioLabel: {
-    fontSize: '12px',
-    color: '#8b949e',
-  },
-  ratioVal: {
-    fontSize: '32px',
-    fontWeight: 800,
-  },
-}

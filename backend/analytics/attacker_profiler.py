@@ -171,6 +171,7 @@ async def build_attacker_profile(source_ip: str, session: AsyncSession) -> Dict[
         "low_alerts": low_alerts,
         "risk_score": risk_score,
         "risk_level": risk_level,
+        "risk_breakdown": risk_calc.get("breakdown", {}),
         "threat_intelligence": threat_intel,
         "recent_activity": recent_activity,
     }

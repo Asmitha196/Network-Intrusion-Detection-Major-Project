@@ -3,11 +3,12 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   ResponsiveContainer, XAxis, YAxis, Tooltip,
 } from 'recharts'
-import { Radio, TrendingUp, AlertTriangle } from 'lucide-react'
+import { TrendingUp, AlertTriangle, ShieldCheck, Cpu, Database, Activity, Radio } from 'lucide-react'
 import apiClient from '../api/client'
 import { StatCard, Panel, SectionHeader, SeverityBadge, IP, Table, Tr, Td, EmptyState, LoadingState } from '../components/ui'
 import { useWebSocket } from '../hooks/useWebSocket'
-import type { Alert, SystemHealth, MetricsOverview, MonitorStatus, TrafficStats, WebSocketMessage } from '../types'
+import LiveMonitorPanel from '../components/LiveMonitorPanel'
+import type { Alert, SystemHealth, MetricsOverview, MonitorStatus, TrafficStats, WebSocketMessage, AttackerProfile } from '../types'
 
 function Tip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
@@ -19,27 +20,6 @@ function Tip({ active, payload, label }: any) {
           {p.name ?? p.dataKey}: {typeof p.value === 'number' && p.value > 999 ? p.value.toLocaleString() : p.value}
         </p>
       ))}
-    </div>
-  )
-}
-
-function LiveMetric({ label, value, unit, highlight = false }: {
-  label: string; value: string | number; unit?: string; highlight?: boolean
-}) {
-  return (
-    <div className="flex flex-col items-start px-5 py-3.5 border-r last:border-r-0"
-      style={{ borderColor: 'var(--border)', minWidth: 116 }}>
-      <span className="text-[9.5px] font-mono uppercase tracking-widest mb-1.5" style={{ color: 'var(--tx-5)' }}>{label}</span>
-      <span
-        className="text-[22px] font-mono font-bold leading-none tabular-nums"
-        style={{
-          color: highlight ? 'var(--accent)' : 'var(--tx-1)',
-          textShadow: highlight ? '0 0 16px var(--accent-dim)' : 'none',
-        }}
-      >
-        {typeof value === 'number' ? value.toLocaleString() : value}
-      </span>
-      {unit && <span className="text-[10px] font-mono mt-1" style={{ color: 'var(--tx-5)' }}>{unit}</span>}
     </div>
   )
 }
@@ -69,6 +49,7 @@ export default function Dashboard() {
   const [overview, setOverview] = useState<MetricsOverview | null>(null)
   const [monitor, setMonitor] = useState<MonitorStatus | null>(null)
   const [alerts, setAlerts] = useState<Alert[]>([])
+  const [attackers, setAttackers] = useState<AttackerProfile[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -116,11 +97,12 @@ export default function Dashboard() {
     async function loadDashboardData() {
       try {
         setLoading(true)
-        const [healthRes, overviewRes, monitorRes, alertsRes] = await Promise.allSettled([
+        const [healthRes, overviewRes, monitorRes, alertsRes, attackersRes] = await Promise.allSettled([
           apiClient.get<SystemHealth>('/health'),
           apiClient.get<MetricsOverview>('/metrics/overview'),
           apiClient.get<MonitorStatus>('/monitor/status'),
           apiClient.get<any>('/alerts'),
+          apiClient.get<AttackerProfile[]>('/attackers'),
         ])
 
         if (!isMounted) return
@@ -133,6 +115,10 @@ export default function Dashboard() {
           const raw = alertsRes.value.data
           const items: Alert[] = Array.isArray(raw) ? raw : (raw?.items ?? [])
           setAlerts(items)
+        }
+
+        if (attackersRes.status === 'fulfilled' && Array.isArray(attackersRes.value.data)) {
+          setAttackers(attackersRes.value.data)
         }
       } catch (err: any) {
         if (isMounted) setError(err.message || 'Failed to connect to NIDS API')
@@ -149,12 +135,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (!alertsWsMsg) return
 
-    // Message can be Alert object directly or WebSocketMessage wrapper
     const newAlert: Alert | null = 'id' in alertsWsMsg && 'severity' in alertsWsMsg
       ? (alertsWsMsg as Alert)
-      : 'type' in alertsWsMsg && alertsWsMsg.type === 'connected' && alertsWsMsg.recent_alerts
-        ? null
-        : null
+      : null
 
     if (newAlert) {
       setAlerts(prev => {
@@ -195,13 +178,7 @@ export default function Dashboard() {
   // Computed metrics
   const isWsConnected = alertsWsState === 'open' || trafficWsState === 'open'
   const critCount = useMemo(() => alerts.filter(a => String(a.severity).toLowerCase() === 'critical').length, [alerts])
-  const pps = (monitor?.packets_per_sec !== undefined && monitor?.packets_per_sec !== null) ? monitor.packets_per_sec : (overview?.total_alerts ?? 'N/A')
-  const fps = (monitor?.flows_per_sec !== undefined && monitor?.flows_per_sec !== null) ? monitor.flows_per_sec : 'N/A'
-  const activeFlows = (monitor?.active_flows !== undefined && monitor?.active_flows !== null) ? monitor.active_flows : 'N/A'
   const bwMbps = (monitor?.bandwidth_bps !== undefined && monitor?.bandwidth_bps !== null) ? (monitor.bandwidth_bps / 1_000_000).toFixed(1) : 'N/A'
-  const totalPackets = (monitor?.total_packets_captured !== undefined && monitor?.total_packets_captured !== null) ? (monitor.total_packets_captured >= 1e6 ? (monitor.total_packets_captured / 1e6).toFixed(1) + 'M' : monitor.total_packets_captured.toLocaleString()) : 'N/A'
-  const knownAttacks = (monitor?.known_attacks_detected !== undefined && monitor?.known_attacks_detected !== null) ? monitor.known_attacks_detected : 'N/A'
-  const unknownAttacks = (monitor?.unknown_attacks_detected !== undefined && monitor?.unknown_attacks_detected !== null) ? monitor.unknown_attacks_detected : 'N/A'
 
   // Protocol distribution pie chart data
   const protocolData = useMemo(() => {
@@ -248,12 +225,17 @@ export default function Dashboard() {
     return Object.values(buckets).slice(-7)
   }, [alerts])
 
+  // Recent critical alerts
+  const recentCriticals = useMemo(() => {
+    return alerts.filter(a => String(a.severity).toLowerCase() === 'critical').slice(0, 5)
+  }, [alerts])
+
   if (loading && !health && alerts.length === 0) {
     return <LoadingState />
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 select-none">
       {error && (
         <div className="flex items-center gap-2 p-3 rounded-lg text-[12px] font-mono"
           style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }}>
@@ -263,115 +245,78 @@ export default function Dashboard() {
       )}
 
       {/* ── LIVE MONITOR ── */}
-      <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 12, overflow: 'hidden', position: 'relative',
-        transition: 'background 0.2s, border-color 0.2s',
-      }}>
-        <div style={{
-          position: 'absolute', top: 0, right: 0, width: 260, height: 180,
-          background: 'radial-gradient(ellipse at top right, var(--accent-dim) 0%, transparent 65%)',
-          pointerEvents: 'none',
-        }} />
-
-        <div className="flex items-center justify-between px-5 py-2.5"
-          style={{ borderBottom: '1px solid var(--border)' }}>
-          <div className="flex items-center gap-2.5">
-            <div className="relative flex items-center justify-center">
-              <span className="absolute w-3 h-3 rounded-full"
-                style={{
-                  background: isWsConnected ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)',
-                  animation: 'pulse-ring 2s ease-out infinite',
-                }}
-              />
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: isWsConnected ? '#10b981' : '#ef4444' }} />
-            </div>
-            <span className="text-[11px] font-semibold tracking-[0.14em] uppercase" style={{ color: 'var(--tx-3)' }}>
-              Live Network Monitor
-            </span>
-            <Radio size={11} style={{ color: isWsConnected ? '#10b981' : '#ef4444' }} />
-          </div>
-          <span className="text-[10px] font-mono" style={{ color: isWsConnected ? 'var(--accent)' : 'var(--tx-5)' }}>
-            {isWsConnected ? 'LIVE · WS CONNECTED' : 'POLLING · WS DISCONNECTED'}
-          </span>
-        </div>
-
-        <div className="flex overflow-x-auto">
-          <LiveMetric label="Packets/sec"   value={pps} highlight />
-          <LiveMetric label="Flows/sec"     value={fps} />
-          <LiveMetric label="Active Flows"  value={activeFlows} />
-          <LiveMetric label="Bandwidth"     value={bwMbps} unit="Mbps" />
-          <LiveMetric label="Total Packets" value={totalPackets} />
-          <LiveMetric label="Stage 1 Known" value={knownAttacks} />
-          <LiveMetric label="Stage 2 Anom"  value={unknownAttacks} />
-        </div>
-      </div>
+      <LiveMonitorPanel />
 
       {/* ── STAT CARDS ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Active Alerts"   value={overview?.today_alerts ?? alerts.length} sub="Total generated" accent />
         <StatCard label="Critical Alerts" value={overview?.critical_alerts ?? critCount}   sub="Immediate action required" critical />
-        <StatCard label="Total Flows"     value={monitor?.total_flows_processed ? (monitor.total_flows_processed).toLocaleString() : 'N/A'} sub="Processed by engine" />
-        <StatCard label="Redis Queue"     value={health?.redis ? 'ONLINE' : 'OFFLINE'} sub={health?.redis ? 'Connected' : 'Disconnected'} accent={health?.redis} />
+        <StatCard label="Total Flows"     value={monitor?.total_flows_processed ? (monitor.total_flows_processed).toLocaleString() : (overview?.total_flows?.toLocaleString() ?? 'N/A')} sub="Processed by engine" />
+        <StatCard label="Redis Queue"     value={health?.redis ? 'ONLINE' : 'OFFLINE'} sub={health?.redis ? 'Broker connected' : 'Disconnected'} accent={health?.redis} />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="PostgreSQL"      value={health?.postgres ? 'ONLINE' : 'OFFLINE'} sub={health?.postgres ? 'DB operational' : 'DB error'} />
-        <StatCard label="ML Worker"       value={health?.worker_status === 'running' ? 'RUNNING' : 'STOPPED'} sub={health?.ml_models_loaded?.classifier ? 'Stage 1 + Stage 2' : 'Loading'} accent={health?.worker_status === 'running'} />
-        <StatCard label="WS Connections"  value={health?.active_ws_connections ?? (isWsConnected ? 1 : 0)} sub="Active WebSocket clients" />
-        <StatCard label="Detection Engine" value={health?.status === 'ok' ? 'HEALTHY' : 'DEGRADED'} sub={`v${health?.version ?? '1.0'}`} accent={health?.status === 'ok'} />
+        <StatCard label="PostgreSQL"      value={health?.postgres ? 'ONLINE' : 'OFFLINE'} sub={health?.postgres ? 'TimescaleDB active' : 'DB error'} />
+        <StatCard label="ML Worker"       value={health?.worker_status === 'running' ? 'RUNNING' : 'STOPPED'} sub={health?.ml_models_loaded?.classifier ? 'Stage 1 + Stage 2 active' : 'Loading'} accent={health?.worker_status === 'running'} />
+        <StatCard label="WS Streams"      value={health?.active_ws_connections ?? (isWsConnected ? 1 : 0)} sub="Connected clients" />
+        <StatCard label="Detection Engine" value={health?.status === 'ok' ? 'HEALTHY' : 'DEGRADED'} sub={`Dual-Stage v${health?.version ?? '1.0'}`} accent={health?.status === 'ok'} />
       </div>
 
-      {/* ── CHARTS ── */}
+      {/* ── CHARTS ROW 1 ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Panel className="lg:col-span-2">
-          <SectionHeader title="Attack Timeline" sub="Real-time alert volume by severity" />
+          <SectionHeader title="Attack Timeline" sub="Real-time alert volume categorized by threat level" />
           {timelineData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={190}>
-              <BarChart data={timelineData} barCategoryGap="28%" barGap={0}>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={timelineData} barGap={2} barCategoryGap="20%">
                 <XAxis dataKey="time" axisLine={false} tickLine={false} tick={axisProps} />
                 <YAxis axisLine={false} tickLine={false} tick={axisProps} />
                 <Tooltip content={<Tip />} />
-                <Bar dataKey="critical" name="Critical" stackId="a" fill="var(--crit)" />
-                <Bar dataKey="high"     name="High"     stackId="a" fill="var(--high)" />
-                <Bar dataKey="medium"   name="Medium"   stackId="a" fill="var(--med)" />
-                <Bar dataKey="low"      name="Low"      stackId="a" fill="var(--low)" radius={[3,3,0,0]} />
+                <Bar dataKey="critical" name="Critical" fill="var(--crit)" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="high"     name="High"     fill="var(--high)" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="medium"   name="Medium"   fill="var(--med)"  radius={[3, 3, 0, 0]} />
+                <Bar dataKey="low"      name="Low"      fill="var(--low)"  radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <EmptyState message="No attack timeline data recorded yet" />
+            <EmptyState message="Awaiting alert stream for timeline generation" />
           )}
-          <div className="flex gap-4 mt-2">
-            {[['Critical','var(--crit)'],['High','var(--high)'],['Medium','var(--med)'],['Low','var(--low)']].map(([n,c])=>(
-              <span key={n} className="flex items-center gap-1.5 text-[10px] font-mono" style={{ color: 'var(--tx-4)' }}>
-                <span className="w-2 h-2 rounded-sm" style={{ background: c }} />{n}
-              </span>
-            ))}
-          </div>
         </Panel>
 
         <Panel>
-          <SectionHeader title="Protocol Split" sub="Traffic distribution by protocol" />
+          <SectionHeader title="Protocol Split" sub="Ingress flow transport layers" />
           {protocolData.length > 0 ? (
             <>
-              <ResponsiveContainer width="100%" height={150}>
-                <PieChart>
-                  <Pie data={protocolData} cx="50%" cy="50%" innerRadius={42} outerRadius={68}
-                    dataKey="value" paddingAngle={3}>
-                    {protocolData.map((e, i) => <Cell key={i} fill={e.fill} stroke="none" />)}
-                  </Pie>
-                  <Tooltip content={<Tip />} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="space-y-2 mt-2">
+              <div className="h-32 mb-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={protocolData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={36}
+                      outerRadius={56}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {protocolData.map(d => (
+                        <Cell key={d.name} fill={d.fill} stroke="transparent" />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<Tip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="space-y-1.5 mt-2">
                 {protocolData.map(d => (
                   <div key={d.name} className="flex items-center gap-2 text-[11px] font-mono">
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: d.fill }} />
-                    <span className="flex-1" style={{ color: 'var(--tx-4)' }}>{d.name}</span>
-                    <div className="w-20 h-1 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: d.fill }} />
+                    <span className="flex-1 truncate" style={{ color: 'var(--tx-4)' }}>{d.name}</span>
+                    <div className="w-16 h-1 rounded-full overflow-hidden shrink-0" style={{ background: 'var(--border)' }}>
                       <div className="h-full rounded-full" style={{ width: `${d.value}%`, background: d.fill }} />
                     </div>
-                    <span style={{ color: 'var(--tx-2)' }}>{d.value}%</span>
+                    <span className="w-10 text-right" style={{ color: 'var(--tx-2)' }}>{d.value}%</span>
                   </div>
                 ))}
               </div>
@@ -382,9 +327,10 @@ export default function Dashboard() {
         </Panel>
       </div>
 
+      {/* ── CHARTS ROW 2 ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Panel className="lg:col-span-2">
-          <SectionHeader title="Traffic Throughput" sub="Real-time bandwidth — Mbps">
+          <SectionHeader title="Traffic Throughput" sub="Real-time bandwidth ingress curve (Mbps)">
             <div className="flex items-center gap-1.5">
               <TrendingUp size={12} style={{ color: 'var(--accent)' }} />
               <span className="text-[10px] font-mono" style={{ color: 'var(--tx-5)' }}>{bwMbps} Mbps</span>
@@ -395,7 +341,7 @@ export default function Dashboard() {
               <AreaChart data={throughputHistory}>
                 <defs>
                   <linearGradient id="bwGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%"   stopColor="#00f2fe" stopOpacity={0.18} />
+                    <stop offset="0%"   stopColor="#00f2fe" stopOpacity={0.22} />
                     <stop offset="100%" stopColor="#00f2fe" stopOpacity={0} />
                   </linearGradient>
                 </defs>
@@ -412,14 +358,14 @@ export default function Dashboard() {
         </Panel>
 
         <Panel>
-          <SectionHeader title="Attack Mix" sub="Top detected attack vectors" />
+          <SectionHeader title="Attack Mix" sub="Top detected attack signatures" />
           {attackDistData.length > 0 ? (
             <div className="space-y-3 mt-1">
               {attackDistData.map(d => (
                 <div key={d.name}>
                   <div className="flex justify-between text-[11px] font-mono mb-1">
-                    <span style={{ color: 'var(--tx-4)' }}>{d.name}</span>
-                    <span style={{ color: d.fill }}>{d.count} ({d.percentage}%)</span>
+                    <span className="truncate pr-2" style={{ color: 'var(--tx-4)' }}>{d.name}</span>
+                    <span className="shrink-0" style={{ color: d.fill }}>{d.count} ({d.percentage}%)</span>
                   </div>
                   <div className="h-[3px] rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
                     <div className="h-full rounded-full"
@@ -434,10 +380,112 @@ export default function Dashboard() {
         </Panel>
       </div>
 
+      {/* ── ENTERPRISE SOC SIDE WIDGETS ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Top Attacker IPs */}
+        <Panel>
+          <SectionHeader title="Top Attacker IPs" sub="Active threat actor profiles" />
+          {attackers.length > 0 ? (
+            <div className="space-y-2">
+              {attackers.slice(0, 4).map((att) => (
+                <div
+                  key={att.source_ip || att.ip}
+                  className="flex items-center justify-between p-2.5 rounded-lg"
+                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
+                >
+                  <div className="min-w-0">
+                    <IP>{att.source_ip || att.ip}</IP>
+                    <p className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--tx-5)' }}>
+                      {att.total_alerts ?? 1} alerts · {att.threat_intelligence?.country || 'Global Host'}
+                    </p>
+                  </div>
+                  <span
+                    className="px-2 py-0.5 rounded text-[10px] font-mono font-bold"
+                    style={{
+                      background: (att.risk_score ?? 50) >= 70 ? 'var(--crit-dim)' : 'var(--high-dim)',
+                      border: `1px solid ${(att.risk_score ?? 50) >= 70 ? 'var(--crit-border)' : 'var(--high-border)'}`,
+                      color: (att.risk_score ?? 50) >= 70 ? 'var(--crit)' : 'var(--high)',
+                    }}
+                  >
+                    Risk {att.risk_score ?? 50}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState message="No high-risk attacker profiles" />
+          )}
+        </Panel>
+
+        {/* Recent Critical Alerts Ticker */}
+        <Panel>
+          <SectionHeader title="Recent Critical Alerts" sub="High-priority threat signals" />
+          {recentCriticals.length > 0 ? (
+            <div className="space-y-2">
+              {recentCriticals.map((ca) => (
+                <div
+                  key={ca.id}
+                  className="p-2.5 rounded-lg border flex items-start justify-between gap-2"
+                  style={{ background: 'var(--crit-dim)', borderColor: 'var(--crit-border)' }}
+                >
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-mono font-bold truncate" style={{ color: 'var(--crit)' }}>
+                      {ca.attack_type || 'Unknown Attack Signature'}
+                    </p>
+                    <p className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--tx-4)' }}>
+                      Src: <IP>{ca.src_ip}</IP> → Dst: {ca.dst_ip}
+                    </p>
+                  </div>
+                  <span className="text-[9.5px] font-mono whitespace-nowrap" style={{ color: 'var(--tx-5)' }}>
+                    {ca.timestamp ? ca.timestamp.slice(11, 19) : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-6 text-center" style={{ color: 'var(--tx-5)' }}>
+              <ShieldCheck size={28} className="mb-2" style={{ color: 'var(--low)' }} />
+              <p className="text-[11px] font-mono">0 unhandled critical alerts</p>
+            </div>
+          )}
+        </Panel>
+
+        {/* Dynamic System Insights Panel */}
+        <Panel>
+          <SectionHeader title="System Telemetry Insights" sub="Computed from live engine state" />
+          <div className="space-y-2 text-[11px] font-mono">
+            <div className="flex items-center gap-2 p-2 rounded-lg" style={{ background: 'var(--surface-2)' }}>
+              <Activity size={13} style={{ color: 'var(--accent)' }} />
+              <span style={{ color: 'var(--tx-3)' }}>
+                Dual-Stage Engine: <strong style={{ color: 'var(--tx-1)' }}>Stage 1 RF + Stage 2 AE</strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-2 p-2 rounded-lg" style={{ background: 'var(--surface-2)' }}>
+              <Database size={13} style={{ color: health?.postgres ? 'var(--low)' : 'var(--crit)' }} />
+              <span style={{ color: 'var(--tx-3)' }}>
+                TimescaleDB Hypertable: <strong style={{ color: health?.postgres ? 'var(--low)' : 'var(--crit)' }}>{health?.postgres ? 'Healthy' : 'Degraded'}</strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-2 p-2 rounded-lg" style={{ background: 'var(--surface-2)' }}>
+              <Radio size={13} style={{ color: health?.redis ? 'var(--accent)' : 'var(--crit)' }} />
+              <span style={{ color: 'var(--tx-3)' }}>
+                Redis Queue Stream: <strong style={{ color: health?.redis ? 'var(--accent)' : 'var(--crit)' }}>ids:flows</strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-2 p-2 rounded-lg" style={{ background: 'var(--surface-2)' }}>
+              <Cpu size={13} style={{ color: 'var(--low)' }} />
+              <span style={{ color: 'var(--tx-3)' }}>
+                Active Flows: <strong style={{ color: 'var(--tx-1)' }}>{monitor?.active_flows ?? 0} in cache</strong>
+              </span>
+            </div>
+          </div>
+        </Panel>
+      </div>
+
       {/* ── RECENT ALERTS ── */}
       <Panel>
         <SectionHeader title="Recent Security Alerts" sub="Real-time Stage 1 & Stage 2 detections">
-          <span className="text-[11px] font-mono" style={{ color: 'var(--accent)' }}>{alerts.length} total</span>
+          <span className="text-[11px] font-mono" style={{ color: 'var(--accent)' }}>{alerts.length} total events</span>
         </SectionHeader>
         {alerts.length > 0 ? (
           <Table headers={['Time', 'Source IP', 'Dest IP', 'Proto', 'Attack Type', 'Severity', 'Confidence']}>

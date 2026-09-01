@@ -23,12 +23,18 @@ export const AttackTimeline: React.FC<AttackTimelineProps> = ({
   onIntervalChange,
 }) => {
   const formattedData = timeline.map((item) => {
-    let label = item.timestamp
+    let label = String(item.timestamp || '')
     try {
       const d = new Date(item.timestamp)
-      label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      if (!isNaN(d.getTime())) {
+        if (interval === '1d') {
+          label = d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+        } else {
+          label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      }
     } catch {
-      label = item.timestamp
+      label = String(item.timestamp || '')
     }
     return {
       ...item,

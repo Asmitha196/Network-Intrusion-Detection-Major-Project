@@ -156,6 +156,18 @@ function IncidentDrawer({ incidentId, onClose, onStatusChange }: {
               ))}
             </div>
 
+            {/* CONNECTED SOC NAVIGATION ACTIONS (PHASE 3) */}
+            <div className="flex flex-wrap items-center gap-2 pt-1 select-none">
+              <a href="/attackers" className="px-3 py-1.5 rounded-lg text-[11px] font-mono font-semibold"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
+                Investigate Source IP
+              </a>
+              <a href="/incident-response" className="px-3 py-1.5 rounded-lg text-[11px] font-mono font-semibold"
+                style={{ background: 'var(--crit-dim)', border: '1px solid var(--crit-border)', color: 'var(--crit)' }}>
+                Respond & Contain
+              </a>
+            </div>
+
             {/* Linked Stage 1 & Stage 2 Alerts */}
             <div>
               <p className="text-[11px] font-mono uppercase tracking-widest mb-2" style={{ color: 'var(--tx-4)' }}>
@@ -261,6 +273,39 @@ export default function CorrelatedIncidentsPage() {
 
   return (
     <div className="space-y-4 select-none">
+      {/* Visual Pipeline Flow Banner */}
+      <Panel noPad className="p-3">
+        <div className="flex items-center justify-between gap-4 mb-2">
+          <span className="text-[10px] font-mono font-bold uppercase tracking-widest" style={{ color: 'var(--tx-4)' }}>
+            Attack Correlation Architecture
+          </span>
+          <span className="text-[10px] font-mono" style={{ color: 'var(--accent)' }}>
+            Auto-Cluster Engine
+          </span>
+        </div>
+        <div className="flex items-center flex-wrap gap-2">
+          {[
+            'Multiple Security Events',
+            'Same 5-Tuple / Time Window',
+            'Cross-Stage Correlation',
+            'Risk Score Calculation',
+            'Recommended Containment',
+          ].map((step, idx, arr) => (
+            <div key={idx} className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10.5px] font-mono font-semibold"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--tx-2)' }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+                {step}
+              </div>
+              {idx < arr.length - 1 && (
+                <span className="text-[11px] font-mono" style={{ color: 'var(--accent)', opacity: 0.6 }}>→</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </Panel>
 
       {/* ── STAT CARDS ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -269,6 +314,7 @@ export default function CorrelatedIncidentsPage() {
         <StatCard label="Investigating"     value={invCount}          sub="Under active review" accent={invCount > 0} />
         <StatCard label="Resolved"          value={resCount}          sub="Remediated incidents" />
       </div>
+
 
       {/* ── INCIDENTS LIST ── */}
       <Panel>

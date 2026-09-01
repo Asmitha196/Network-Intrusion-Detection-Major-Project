@@ -296,3 +296,64 @@ export function Modal({ title, children, onClose }: { title: string; children: R
     </div>
   );
 }
+
+/* ─────────────────────────────────────────
+   Filter Chip
+───────────────────────────────────────── */
+export function FilterChip({
+  label, active, onClick, count,
+}: {
+  label: string; active: boolean; onClick: () => void; count?: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-mono font-medium transition-all duration-150 select-none"
+      style={active ? {
+        background: 'var(--accent-dim)',
+        border: '1px solid var(--accent-border)',
+        color: 'var(--accent)',
+        fontWeight: 600,
+        boxShadow: '0 0 8px rgba(0,242,254,0.15)',
+      } : {
+        background: 'var(--surface-2)',
+        border: '1px solid var(--border)',
+        color: 'var(--tx-4)',
+      }}
+    >
+      <span>{label}</span>
+      {count !== undefined && (
+        <span
+          className="px-1.5 py-0.2 rounded-full text-[9px] font-mono"
+          style={active ? { background: 'var(--accent)', color: '#090d16', fontWeight: 700 } : { background: 'var(--border)', color: 'var(--tx-3)' }}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/* ─────────────────────────────────────────
+   Pipeline Step Flow Indicator
+───────────────────────────────────────── */
+export function PipelineFlow({ steps }: { steps: string[] }) {
+  return (
+    <div className="flex items-center flex-wrap gap-2 p-3 rounded-lg overflow-x-auto" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+      {steps.map((step, idx) => (
+        <div key={idx} className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-mono font-bold tracking-wider uppercase"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--tx-2)' }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+            {step}
+          </div>
+          {idx < steps.length - 1 && (
+            <span className="text-[10px] font-mono" style={{ color: 'var(--accent)', opacity: 0.6 }}>→</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+

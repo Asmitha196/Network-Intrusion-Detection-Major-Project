@@ -107,12 +107,30 @@ export default function SimulationPage() {
   }
 
   return (
-    <div className="space-y-5 select-none">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+    <div className="space-y-4 select-none">
+      {/* Simulation Lab Safety Notice Banner */}
+      <Panel noPad className="p-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase"
+              style={{ background: 'var(--med-dim)', border: '1px solid var(--med-border)', color: 'var(--med)' }}>
+              Controlled Lab Environment
+            </span>
+            <span className="text-[11px] font-mono" style={{ color: 'var(--tx-3)' }}>
+              All network packet simulations are injected in isolated buffers for ML verification
+            </span>
+          </div>
+          <span className="text-[10px] font-mono uppercase" style={{ color: 'var(--tx-5)' }}>
+            NON-DESTRUCTIVE REPLAY
+          </span>
+        </div>
+      </Panel>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Attack selection panel */}
         <Panel className="lg:col-span-1">
           <SectionHeader title="Attack Pattern" sub="Select demonstration attack scenario" />
+
           <div className="space-y-1.5 max-h-[480px] overflow-y-auto pr-1">
             {ATTACK_PATTERNS.map(a => {
               const isAvailable = availablePatterns.length === 0 || availablePatterns.includes(a.id)

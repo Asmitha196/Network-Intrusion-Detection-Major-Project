@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Play, Square, Wifi, AlertTriangle } from 'lucide-react'
 import apiClient from '../api/client'
 import type { NetworkInterface, MonitorStatus, Alert } from '../types'
 
@@ -109,32 +110,70 @@ export default function LiveMonitorPanel({ onAlertSelect: _onAlertSelect }: Live
   const isActive = status?.active ?? false
 
   return (
-    <div style={styles.container}>
+    <div
+      className="rounded-xl p-4 md:p-5 relative overflow-hidden transition-all duration-200"
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        boxShadow: isActive ? '0 0 20px rgba(0, 242, 254, 0.06)' : 'none',
+      }}
+    >
+      {/* Top Accent Stripe */}
+      <div
+        className="absolute top-0 left-0 right-0 h-[2px]"
+        style={{
+          background: isActive
+            ? 'linear-gradient(90deg, #10b981 0%, #00f2fe 50%, #10b981 100%)'
+            : 'linear-gradient(90deg, transparent, var(--border), transparent)',
+        }}
+      />
+
       {/* Top Header & Controls */}
-      <div style={styles.header}>
-        <div style={styles.titleGroup}>
-          <div style={styles.statusBadgeGroup}>
-            <span
-              style={{
-                ...styles.statusDot,
-                backgroundColor: isActive ? '#10b981' : '#6e7681',
-                boxShadow: isActive ? '0 0 8px #10b981' : 'none',
-              }}
-            />
-            <span style={styles.statusText}>
-              {isActive ? 'LIVE MONITORING ACTIVE' : 'LIVE MONITORING STOPPED'}
-            </span>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-3">
+          <div
+            className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+            style={{
+              background: isActive ? 'var(--low-dim)' : 'var(--surface-2)',
+              border: `1px solid ${isActive ? 'var(--low-border)' : 'var(--border)'}`,
+            }}
+          >
+            <Wifi size={16} style={{ color: isActive ? 'var(--low)' : 'var(--tx-4)' }} />
           </div>
-          <span style={styles.subText}>
-            Continuous real-time packet capture & dual-stage ML detection
-          </span>
+
+          <div>
+            <div className="flex items-center gap-2.5">
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{
+                  backgroundColor: isActive ? '#10b981' : '#5b6880',
+                  boxShadow: isActive ? '0 0 10px #10b981' : 'none',
+                  animation: isActive ? 'blink-dot 1.5s ease-in-out infinite' : 'none',
+                }}
+              />
+              <span className="text-[13px] font-mono font-bold tracking-wider uppercase" style={{ color: isActive ? 'var(--low)' : 'var(--tx-3)' }}>
+                {isActive ? 'Live Packet Ingestion Active' : 'Live Packet Ingestion Paused'}
+              </span>
+            </div>
+            <p className="text-[11px] font-mono mt-0.5" style={{ color: 'var(--tx-4)' }}>
+              Npcap Layer 2/3 packet streaming → FlowBuilder → Redis Stream → Stage 1 & 2 ML Detection
+            </p>
+          </div>
         </div>
 
-        <div style={styles.controlGroup}>
-          <div style={styles.selectWrapper}>
-            <label style={styles.label}>Interface:</label>
+        <div className="flex items-center flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono uppercase tracking-wider font-semibold" style={{ color: 'var(--tx-4)' }}>
+              NIC:
+            </span>
             <select
-              style={styles.select}
+              className="text-[12px] font-mono px-3 py-1.5 rounded-lg outline-none cursor-pointer transition-colors"
+              style={{
+                backgroundColor: 'var(--surface-2)',
+                color: 'var(--tx-1)',
+                border: '1px solid var(--border)',
+                minWidth: '220px',
+              }}
               value={selectedIface}
               disabled={isActive || loading}
               onChange={(e) => setSelectedIface(e.target.value)}
@@ -149,200 +188,100 @@ export default function LiveMonitorPanel({ onAlertSelect: _onAlertSelect }: Live
 
           {isActive ? (
             <button
-              style={{ ...styles.button, backgroundColor: '#dc2626' }}
+              type="button"
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-mono font-bold uppercase tracking-wider transition-all duration-150 shadow-md cursor-pointer select-none"
+              style={{
+                backgroundColor: '#dc2626',
+                color: '#ffffff',
+                border: '1px solid #ef4444',
+                boxShadow: '0 0 12px rgba(239, 68, 68, 0.3)',
+              }}
               onClick={handleStop}
               disabled={loading}
             >
-              {loading ? 'Stopping...' : 'Stop Monitoring'}
+              <Square size={13} fill="#ffffff" />
+              <span>{loading ? 'Stopping...' : 'Stop Capture'}</span>
             </button>
           ) : (
             <button
-              style={{ ...styles.button, backgroundColor: '#10b981' }}
+              type="button"
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-mono font-bold uppercase tracking-wider transition-all duration-150 shadow-md cursor-pointer select-none"
+              style={{
+                backgroundColor: '#10b981',
+                color: '#090d16',
+                border: '1px solid #34d399',
+                boxShadow: '0 0 12px rgba(16, 185, 129, 0.3)',
+              }}
               onClick={handleStart}
               disabled={loading}
             >
-              {loading ? 'Starting...' : 'Start Monitoring'}
+              <Play size={13} fill="#090d16" />
+              <span>{loading ? 'Starting...' : 'Start Capture'}</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Error Alert Message */}
-      {errorMsg && <div style={styles.errorAlert}>{errorMsg}</div>}
+      {/* Error Alert Banner */}
+      {errorMsg && (
+        <div
+          className="flex items-center gap-2.5 p-3 rounded-lg text-[12px] font-mono mb-4"
+          style={{
+            backgroundColor: 'var(--crit-dim)',
+            border: '1px solid var(--crit-border)',
+            color: 'var(--crit)',
+          }}
+        >
+          <AlertTriangle size={14} className="shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
 
       {/* Metric Telemetry Cards Grid */}
-      <div style={styles.metricsGrid}>
-        <div style={styles.metricCard}>
-          <span style={styles.metricTitle}>PACKETS / SEC</span>
-          <span style={styles.metricValue}>{status?.packets_per_sec ?? 0}</span>
-          <span style={styles.metricSubtext}>Live capture throughput</span>
-        </div>
-
-        <div style={styles.metricCard}>
-          <span style={styles.metricTitle}>FLOWS / SEC</span>
-          <span style={styles.metricValue}>{status?.flows_per_sec ?? 0}</span>
-          <span style={styles.metricSubtext}>Completed flows emitted</span>
-        </div>
-
-        <div style={styles.metricCard}>
-          <span style={styles.metricTitle}>ACTIVE FLOWS</span>
-          <span style={styles.metricValue}>{status?.active_flows ?? 0}</span>
-          <span style={styles.metricSubtext}>In-memory flow cache</span>
-        </div>
-
-        <div style={styles.metricCard}>
-          <span style={styles.metricTitle}>BANDWIDTH</span>
-          <span style={styles.metricValue}>{formatBandwidth(status?.bandwidth_bps ?? 0)}</span>
-          <span style={styles.metricSubtext}>Ingress network rate</span>
-        </div>
-
-        <div style={styles.metricCard}>
-          <span style={styles.metricTitle}>TOTAL PACKETS</span>
-          <span style={styles.metricValue}>{status?.total_packets_captured ?? 0}</span>
-          <span style={styles.metricSubtext}>Cumulative captured</span>
-        </div>
-
-        <div style={styles.metricCard}>
-          <span style={styles.metricTitle}>TOTAL FLOWS</span>
-          <span style={styles.metricValue}>{status?.total_flows_processed ?? 0}</span>
-          <span style={styles.metricSubtext}>Pushed to Redis Stream</span>
-        </div>
-
-        <div style={styles.metricCard}>
-          <span style={styles.metricTitle}>KNOWN ATTACKS</span>
-          <span style={{ ...styles.metricValue, color: (status?.known_attacks_detected ?? 0) > 0 ? '#ef4444' : '#f0f6fc' }}>
-            {status?.known_attacks_detected ?? 0}
-          </span>
-          <span style={styles.metricSubtext}>Stage 1 RandomForest</span>
-        </div>
-
-        <div style={styles.metricCard}>
-          <span style={styles.metricTitle}>UNKNOWN / ZERO-DAY</span>
-          <span style={{ ...styles.metricValue, color: (status?.unknown_attacks_detected ?? 0) > 0 ? '#a855f7' : '#f0f6fc' }}>
-            {status?.unknown_attacks_detected ?? 0}
-          </span>
-          <span style={styles.metricSubtext}>Stage 2 Autoencoder</span>
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
+        {[
+          { label: 'PACKETS / SEC', value: status?.packets_per_sec ?? 0, sub: 'Real-time ingress', col: 'var(--tx-1)' },
+          { label: 'FLOWS / SEC', value: status?.flows_per_sec ?? 0, sub: 'Completed flows', col: 'var(--tx-1)' },
+          { label: 'ACTIVE FLOWS', value: status?.active_flows ?? 0, sub: 'In-memory cache', col: 'var(--accent)' },
+          { label: 'BANDWIDTH', value: formatBandwidth(status?.bandwidth_bps ?? 0), sub: 'Throughput rate', col: 'var(--accent)' },
+          { label: 'TOTAL PACKETS', value: (status?.total_packets_captured ?? 0).toLocaleString(), sub: 'Hardware NIC', col: 'var(--tx-1)' },
+          { label: 'TOTAL FLOWS', value: (status?.total_flows_processed ?? 0).toLocaleString(), sub: 'Redis stream', col: 'var(--tx-1)' },
+          {
+            label: 'KNOWN ATTACKS',
+            value: status?.known_attacks_detected ?? 0,
+            sub: 'Stage 1 RF',
+            col: (status?.known_attacks_detected ?? 0) > 0 ? 'var(--crit)' : 'var(--tx-1)',
+            alert: (status?.known_attacks_detected ?? 0) > 0,
+          },
+          {
+            label: 'ZERO-DAY ANOMALY',
+            value: status?.unknown_attacks_detected ?? 0,
+            sub: 'Stage 2 AE',
+            col: (status?.unknown_attacks_detected ?? 0) > 0 ? '#a855f7' : 'var(--tx-1)',
+            alert: (status?.unknown_attacks_detected ?? 0) > 0,
+          },
+        ].map((item, idx) => (
+          <div
+            key={idx}
+            className="rounded-lg p-2.5 flex flex-col justify-between transition-colors"
+            style={{
+              backgroundColor: 'var(--surface-2)',
+              border: item.alert ? '1px solid var(--crit-border)' : '1px solid var(--border)',
+            }}
+          >
+            <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-ellipsis overflow-hidden whitespace-nowrap" style={{ color: 'var(--tx-4)' }}>
+              {item.label}
+            </span>
+            <span className="text-[17px] font-mono font-bold my-1 tracking-tight" style={{ color: item.col }}>
+              {item.value}
+            </span>
+            <span className="text-[9.5px] font-mono" style={{ color: 'var(--tx-5)' }}>
+              {item.sub}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   )
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    backgroundColor: '#0d1117',
-    border: '1px solid #21262d',
-    borderRadius: '8px',
-    padding: '20px',
-    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
-    color: '#f0f6fc',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: '16px',
-    marginBottom: '16px',
-  },
-  titleGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  statusBadgeGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  statusDot: {
-    width: '10px',
-    height: '10px',
-    borderRadius: '50%',
-    transition: 'all 0.3s ease',
-  },
-  statusText: {
-    fontSize: '14px',
-    fontWeight: 700,
-    letterSpacing: '0.5px',
-    textTransform: 'uppercase',
-  },
-  subText: {
-    fontSize: '12px',
-    color: '#8b949e',
-  },
-  controlGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  selectWrapper: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  label: {
-    fontSize: '13px',
-    color: '#8b949e',
-    fontWeight: 500,
-  },
-  select: {
-    backgroundColor: '#161b22',
-    color: '#f0f6fc',
-    border: '1px solid #30363d',
-    borderRadius: '6px',
-    padding: '8px 12px',
-    fontSize: '13px',
-    outline: 'none',
-    cursor: 'pointer',
-    minWidth: '220px',
-  },
-  button: {
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '6px',
-    padding: '8px 16px',
-    fontSize: '13px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-  },
-  errorAlert: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    border: '1px solid #ef4444',
-    color: '#ef4444',
-    padding: '10px 14px',
-    borderRadius: '6px',
-    fontSize: '13px',
-    marginBottom: '16px',
-  },
-  metricsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-    gap: '12px',
-  },
-  metricCard: {
-    backgroundColor: '#161b22',
-    border: '1px solid #21262d',
-    borderRadius: '6px',
-    padding: '12px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  metricTitle: {
-    fontSize: '10px',
-    fontWeight: 700,
-    color: '#8b949e',
-    letterSpacing: '0.5px',
-  },
-  metricValue: {
-    fontSize: '20px',
-    fontWeight: 700,
-    color: '#f0f6fc',
-  },
-  metricSubtext: {
-    fontSize: '10px',
-    color: '#6e7681',
-  },
-}
