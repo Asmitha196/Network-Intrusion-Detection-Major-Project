@@ -207,22 +207,63 @@ class LiveCaptureEngine:
         self._builder = FlowBuilder()
         self._async_loop: Optional[asyncio.AbstractEventLoop] = None
 
+    def _stop_internal(self) -> Dict[str, Any]:
+        logger.info("Stopping LiveCaptureEngine...")
+        self._stop_event.set()
+        self.active = False
+
+        if self._sniffer:
+            try:
+                if getattr(self._sniffer, 'running', False):
+                    self._sniffer.stop()
+            except Exception as e:
+                logger.warning("Error stopping AsyncSniffer: %s", e)
+            self._sniffer = None
+
+        uptime = time.time() - (self.start_time or time.time())
+        self.packets_per_sec = 0.0
+        self.flows_per_sec = 0.0
+        self.bandwidth_bps = 0.0
+        self._pkt_window_count = 0
+        self._flow_window_count = 0
+        self._bytes_window_count = 0
+
+        return {
+            "status": "success",
+            "message": "Live monitoring stopped successfully",
+            "uptime_seconds": round(uptime, 2),
+            "total_packets": self.total_packets_captured,
+            "total_flows": self.total_flows_processed,
+        }
+
     def start(self, interface_name: str, redis_url: Optional[str] = None) -> Dict[str, Any]:
         if redis_url is None:
             redis_url = get_redis_url()
 
         with self._lock:
+            # Check if an existing session is running
             if self.active:
-                return {
-                    "status": "error",
-                    "message": f"Monitoring is already running on interface '{self.interface}'",
-                }
+                sniffer_alive = (
+                    self._sniffer is not None and
+                    getattr(self._sniffer, 'thread', None) is not None and
+                    self._sniffer.thread.is_alive()
+                )
+                if sniffer_alive and self.interface == interface_name:
+                    logger.info("Monitoring is already active on interface '%s'", self.interface)
+                    return {
+                        "status": "success",
+                        "message": f"Monitoring is already running on interface '{self.interface}'",
+                        "interface": self.interface,
+                    }
+                else:
+                    logger.info("Stopping previous capture session to start fresh on '%s'...", interface_name)
+                    self._stop_internal()
 
             # Check if pcap provider is available on Windows
             if os.name == "nt" and not getattr(conf, "use_pcap", False):
                 err_msg = (
                     "Npcap is required for real-time live network packet capture on Windows. "
-                    "Please install Npcap with 'WinPcap API-compatible mode' enabled (installer located at C:\\Users\\Ashmitha\\Downloads\\npcap-installer.exe)."
+                    "Please install Npcap with 'WinPcap API-compatible mode' enabled."
                 )
                 logger.error("Cannot start capture: %s", err_msg)
                 self.active = False
@@ -295,36 +336,10 @@ class LiveCaptureEngine:
 
     def stop(self) -> Dict[str, Any]:
         with self._lock:
-            if not self.active:
-                return {"status": "error", "message": "Monitoring is not currently active"}
+            if not self.active and (not self._sniffer or not getattr(self._sniffer, 'running', False)):
+                return {"status": "success", "message": "Monitoring is not currently active", "active": False}
 
-            logger.info("Stopping LiveCaptureEngine...")
-            self._stop_event.set()
-            self.active = False
-
-            if self._sniffer:
-                try:
-                    if getattr(self._sniffer, 'running', False):
-                        self._sniffer.stop()
-                except Exception as e:
-                    logger.warning("Error stopping AsyncSniffer: %s", e)
-                self._sniffer = None
-
-            uptime = time.time() - (self.start_time or time.time())
-            self.packets_per_sec = 0.0
-            self.flows_per_sec = 0.0
-            self.bandwidth_bps = 0.0
-            self._pkt_window_count = 0
-            self._flow_window_count = 0
-            self._bytes_window_count = 0
-
-            return {
-                "status": "success",
-                "message": "Live monitoring stopped successfully",
-                "uptime_seconds": round(uptime, 2),
-                "total_packets": self.total_packets_captured,
-                "total_flows": self.total_flows_processed,
-            }
+            return self._stop_internal()
 
     def get_status(self) -> Dict[str, Any]:
         now = time.time()

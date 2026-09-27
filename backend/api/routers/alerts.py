@@ -10,11 +10,11 @@ from __future__ import annotations
 import math
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, func, desc, asc
+from sqlalchemy import select, func, desc, asc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -73,8 +73,10 @@ def _format_alert_out(alert: Alert, flow: Optional[FlowRecord] = None) -> AlertO
 async def list_alerts(
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(default=50, ge=1, le=500, description="Max results per page"),
-    severity: Optional[SeverityEnum] = Query(default=None, description="Filter by severity level"),
+    severity: Optional[str] = Query(default=None, description="Filter by severity level (critical/high/medium/low)"),
+    stage: Optional[int] = Query(default=None, description="Filter by detection stage (1 or 2)"),
     attack_type: Optional[str] = Query(default=None, description="Filter by attack label"),
+    search: Optional[str] = Query(default=None, description="Search term for attack label or IP"),
     min_confidence: Optional[float] = Query(default=None, ge=0.0, le=1.0, description="Minimum confidence threshold"),
     start_ts: Optional[datetime] = Query(default=None, description="Filter alerts after timestamp (ISO 8601)"),
     end_ts: Optional[datetime] = Query(default=None, description="Filter alerts before timestamp (ISO 8601)"),
@@ -91,10 +93,21 @@ async def list_alerts(
     # Base query filter
     filters = [Alert.deleted == False, Alert.deleted_at.is_(None)]
 
-    if severity is not None:
-        filters.append(Alert.severity == severity.value)
+    if severity is not None and severity.upper() != "ALL":
+        filters.append(func.lower(Alert.severity) == severity.lower())
+    if stage is not None:
+        filters.append(Alert.stage == stage)
     if attack_type is not None:
         filters.append(Alert.attack_type.ilike(f"%{attack_type}%"))
+    if search is not None and search.strip():
+        s = f"%{search.strip()}%"
+        filters.append(
+            or_(
+                Alert.attack_type.ilike(s),
+                FlowRecord.src_ip.ilike(s),
+                FlowRecord.dst_ip.ilike(s),
+            )
+        )
     if min_confidence is not None:
         filters.append(Alert.confidence >= min_confidence)
     if start_ts is not None:

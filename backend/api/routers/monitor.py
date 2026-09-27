@@ -51,15 +51,8 @@ async def get_network_interfaces() -> List[Dict[str, Any]]:
 async def start_live_monitoring(body: StartMonitorRequest) -> Dict[str, Any]:
     """
     Start continuous live packet capture on the specified interface.
-    Only ONE monitoring session can run at a time.
     """
     engine = LiveCaptureEngine()
-    if engine.active:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Monitoring session already active on interface '{engine.interface}'. Stop it first.",
-        )
-
     res = engine.start(interface_name=body.interface)
     if res.get("status") == "error":
         raise HTTPException(
@@ -75,8 +68,6 @@ async def stop_live_monitoring() -> Dict[str, Any]:
     Stop the currently active live network monitoring session.
     """
     engine = LiveCaptureEngine()
-    if not engine.active:
-        return {"status": "stopped", "message": "No monitoring session is currently active."}
     return engine.stop()
 
 
